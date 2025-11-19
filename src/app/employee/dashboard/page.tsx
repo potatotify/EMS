@@ -1,17 +1,18 @@
-'use client';
+"use client";
 
-import { useSession } from 'next-auth/react';
-import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
-import { FolderKanban, Clock, TrendingUp, AlertCircle, Mail } from 'lucide-react';
+import {useSession} from "next-auth/react";
+import {useRouter} from "next/navigation";
+import {useEffect, useState} from "react";
+import {FolderKanban, Clock, TrendingUp, AlertCircle, Mail} from "lucide-react";
+import {motion} from "framer-motion";
 
-import Header from '@/components/shared/Header';
-import StatCard from '@/components/shared/StatCard';
-import LoadingSpinner from '@/components/shared/LoadingSpinner';
+import Header from "@/components/shared/Header";
+import StatCard from "@/components/shared/StatCard";
+import LoadingSpinner from "@/components/shared/LoadingSpinner";
 
-import ProjectProgressCard from '@/components/employee/ProjectProgressCard';
-import DailyUpdateModal from '@/components/employee/DailyUpdateModal';
-import DailyUpdateForm from '@/components/employee/DailyUpdateForm';
+import ProjectProgressCard from "@/components/employee/ProjectProgressCard";
+import DailyUpdateModal from "@/components/employee/DailyUpdateModal";
+import DailyUpdateForm from "@/components/employee/DailyUpdateForm";
 
 interface Project {
   _id: string;
@@ -26,7 +27,7 @@ interface Project {
 }
 
 export default function EmployeeDashboard() {
-  const { data: session, status } = useSession();
+  const {data: session, status} = useSession();
   const router = useRouter();
 
   const [projects, setProjects] = useState<Project[]>([]);
@@ -35,10 +36,10 @@ export default function EmployeeDashboard() {
   const [unreadMessages, setUnreadMessages] = useState(0);
 
   useEffect(() => {
-    if (status === 'authenticated') {
+    if (status === "authenticated") {
       const profileCompleted = (session?.user as any)?.profileCompleted;
       if (!profileCompleted) {
-        router.push('/employee/onboarding');
+        router.push("/employee/onboarding");
       } else {
         fetchProjects();
         fetchUnreadMessages();
@@ -48,36 +49,36 @@ export default function EmployeeDashboard() {
 
   const fetchUnreadMessages = async () => {
     try {
-      const res = await fetch('/api/employee/messages/unread-count');
+      const res = await fetch("/api/employee/messages/unread-count");
       const data = await res.json();
       if (res.ok) {
         setUnreadMessages(data.unread || 0);
       }
     } catch (err) {
-      console.error('Error fetching unread message count', err);
+      console.error("Error fetching unread message count", err);
     }
   };
 
   const fetchProjects = async () => {
     try {
-      const response = await fetch('/api/projects');
+      const response = await fetch("/api/projects");
       const data = await response.json();
       if (response.ok) {
         setProjects(data.projects);
       }
     } catch (error) {
-      console.error('Error fetching projects:', error);
+      console.error("Error fetching projects:", error);
     } finally {
       setLoading(false);
     }
   };
 
-  if (status === 'loading' || loading) {
+  if (status === "loading" || loading) {
     return <LoadingSpinner />;
   }
 
-  if (status === 'unauthenticated') {
-    router.push('/login');
+  if (status === "unauthenticated") {
+    router.push("/login");
     return null;
   }
 
@@ -86,7 +87,10 @@ export default function EmployeeDashboard() {
   if (!isApproved) {
     return (
       <div className="min-h-screen bg-[#F2FBF5]">
-        <Header title="Employee Dashboard" userName={session?.user?.name || ''} />
+        <Header
+          title="Employee Dashboard"
+          userName={session?.user?.name || ""}
+        />
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
           <div className="flex items-center justify-center min-h-[60vh]">
             <div className="bg-white rounded-2xl shadow-xl border border-amber-200 p-12 max-w-2xl text-center">
@@ -101,7 +105,7 @@ export default function EmployeeDashboard() {
               </p>
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-6">
                 <p className="text-sm text-amber-900">
-                  You'll receive an email once your account has been approved. 
+                  You'll receive an email once your account has been approved.
                   Please check back later.
                 </p>
               </div>
@@ -113,24 +117,39 @@ export default function EmployeeDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F2FBF5]">
+    <div className="min-h-screen bg-linear-to-br from-slate-50 via-emerald-50/20 to-teal-50/30 relative overflow-hidden">
+      {/* Animated background */}
+      <div className="fixed inset-0 -z-10 opacity-20">
+        <div className="absolute top-0 left-1/4 w-96 h-96 bg-emerald-200 rounded-full mix-blend-multiply filter blur-3xl animate-float" />
+        <div
+          className="absolute bottom-0 right-1/4 w-96 h-96 bg-teal-200 rounded-full mix-blend-multiply filter blur-3xl animate-float"
+          style={{animationDelay: "2s"}}
+        />
+      </div>
+
       <Header
         title="Employee Dashboard"
-        userName={session?.user?.name || ''}
+        userName={session?.user?.name || ""}
         rightActions={
-          <button
+          <motion.button
+            whileHover={{scale: 1.05}}
+            whileTap={{scale: 0.95}}
             type="button"
-            onClick={() => router.push('/employee/messages')}
-            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700 text-xs font-medium hover:bg-emerald-100 border border-emerald-100"
+            onClick={() => router.push("/employee/messages")}
+            className="relative inline-flex items-center gap-2 px-4 py-2 rounded-xl glass-effect border border-white/40 text-emerald-700 text-sm font-semibold hover:shadow-lg transition-all"
           >
             <Mail className="w-4 h-4" />
             <span>Messages</span>
             {unreadMessages > 0 && (
-              <span className="ml-1 inline-flex items-center justify-center min-w-[18px] h-[18px] rounded-full bg-emerald-600 text-white text-[10px]">
+              <motion.span
+                initial={{scale: 0}}
+                animate={{scale: 1}}
+                className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-[20px] h-[20px] rounded-full gradient-emerald text-white text-xs font-bold shadow-lg"
+              >
                 {unreadMessages}
-              </span>
+              </motion.span>
             )}
-          </button>
+          </motion.button>
         }
       />
 
@@ -146,7 +165,7 @@ export default function EmployeeDashboard() {
           />
           <StatCard
             title="In Progress"
-            value={projects.filter((p) => p.status === 'in_progress').length}
+            value={projects.filter((p) => p.status === "in_progress").length}
             icon={Clock}
             iconBgColor="bg-blue-100"
             iconColor="text-blue-600"
@@ -179,8 +198,12 @@ export default function EmployeeDashboard() {
             {projects.length === 0 ? (
               <div className="text-center py-12">
                 <FolderKanban className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                <p className="text-lg font-semibold text-gray-900 mb-2">No projects assigned yet</p>
-                <p className="text-gray-600">Projects assigned to you will appear here</p>
+                <p className="text-lg font-semibold text-gray-900 mb-2">
+                  No projects assigned yet
+                </p>
+                <p className="text-gray-600">
+                  Projects assigned to you will appear here
+                </p>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -201,7 +224,9 @@ export default function EmployeeDashboard() {
           <div className="flex items-start gap-3">
             <AlertCircle className="w-6 h-6 text-blue-600 shrink-0 mt-0.5" />
             <div>
-              <h3 className="font-semibold text-blue-900 mb-2">Daily Update Tips</h3>
+              <h3 className="font-semibold text-blue-900 mb-2">
+                Daily Update Tips
+              </h3>
               <ul className="text-sm text-blue-800 space-y-1">
                 <li>• Submit your daily updates before end of day</li>
                 <li>• Be specific about tasks completed</li>
@@ -220,7 +245,7 @@ export default function EmployeeDashboard() {
           onClose={() => setSelectedProject(null)}
           onSuccess={() => {
             setSelectedProject(null);
-            alert('Update submitted successfully!');
+            alert("Update submitted successfully!");
           }}
         />
       )}
