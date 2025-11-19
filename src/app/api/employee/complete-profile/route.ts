@@ -22,6 +22,16 @@ export async function POST(request: NextRequest) {
     const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
     const employeeId = `EMP${timestamp}${random}`;
 
+    // Normalize skills from comma-separated string to array
+    const rawSkills = Array.isArray(formData.skills)
+      ? formData.skills.join(',')
+      : (formData.skills || '');
+
+    const skills: string[] = rawSkills
+      .split(',')
+      .map((s: string) => s.trim())
+      .filter((s: string) => s.length > 0);
+
     // Create employee profile
     const employeeProfile = {
       userId: new ObjectId(session.user.id),
@@ -36,6 +46,7 @@ export async function POST(request: NextRequest) {
       department: formData.department,
       joiningDate: new Date(formData.joiningDate),
       employeeId: employeeId,
+      skills,
       createdAt: new Date(),
       updatedAt: new Date(),
     };

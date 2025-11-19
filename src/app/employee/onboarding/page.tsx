@@ -20,6 +20,7 @@ export default function EmployeeOnboarding() {
     designation: '',
     department: '',
     joiningDate: '',
+    skills: '',
   });
   
   const [loading, setLoading] = useState(false);
@@ -236,6 +237,21 @@ export default function EmployeeOnboarding() {
                     onChange={(e) => setFormData({ ...formData, joiningDate: e.target.value })}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
                   />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Skills
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.skills}
+                    onChange={(e) => setFormData({ ...formData, skills: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                    placeholder="e.g., React, Node.js, MongoDB"
+                  />
+                  <p className="mt-1 text-xs text-gray-500">
+                    Add your main skills, separated by commas. Admins can use these to assign projects.
+                  </p>
                 </div>
               </div>
             </div>

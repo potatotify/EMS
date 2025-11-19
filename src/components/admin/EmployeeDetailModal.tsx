@@ -14,6 +14,13 @@ interface EmployeeProfile {
   joiningDate?: string;
 }
 
+interface DailyUpdateRecord {
+  _id: string;
+  date: string;
+  status: string;
+  adminApproved: boolean;
+}
+
 interface AttendanceRecord {
   _id: string;
   userId: string;
@@ -30,6 +37,8 @@ interface DailyUpdate {
   challenges?: string;
   nextSteps?: string;
   notes?: string;
+  adminApproved?: boolean;
+  status?: string;
 }
 
 interface Props {
@@ -100,7 +109,7 @@ export default function EmployeeDetailModal({ employeeId, onClose }: Props) {
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
       <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col border border-emerald-100/50">
         {/* Header */}
-        <div className="bg-gradient-to-r from-emerald-600 to-teal-600 px-6 py-4 rounded-t-2xl flex justify-between items-center">
+        <div className="bg-linear-to-r from-emerald-600 to-teal-600 px-6 py-4 rounded-t-2xl flex justify-between items-center">
           <h2 className="text-xl font-bold text-white">Employee Details</h2>
           <button
             onClick={onClose}
@@ -131,7 +140,7 @@ export default function EmployeeDetailModal({ employeeId, onClose }: Props) {
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               } whitespace-nowrap py-4 px-6 border-b-2 font-medium text-sm`}
             >
-              Attendance ({attendance.length})
+              Attendance 
             </button>
             <button
               onClick={() => setActiveTab('updates')}
@@ -150,8 +159,8 @@ export default function EmployeeDetailModal({ employeeId, onClose }: Props) {
         <div className="overflow-y-auto p-6 flex-1">
           {activeTab === 'profile' && (
             <div className="space-y-6">
-              <div className="flex items-center space-x-4 p-4 rounded-xl bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-100/50">
-                <div className="h-20 w-20 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white text-2xl font-bold shadow-md">
+              <div className="flex items-center space-x-4 p-4 rounded-xl bg-linear-to-r from-emerald-50 to-teal-50 border border-emerald-100/50">
+                <div className="h-20 w-20 rounded-lg bg-linear-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white text-2xl font-bold shadow-md">
                   {profile.fullName
                     .split(' ')
                     .map((n) => n[0])
@@ -164,7 +173,7 @@ export default function EmployeeDetailModal({ employeeId, onClose }: Props) {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="p-4 rounded-xl border border-emerald-100/50 bg-white/50 backdrop-blur-sm">
                   <h3 className="text-sm font-semibold text-emerald-900 mb-3">Contact Information</h3>
                   <div className="space-y-3">
@@ -217,6 +226,40 @@ export default function EmployeeDetailModal({ employeeId, onClose }: Props) {
                     )}
                   </div>
                 </div>
+                <div className="p-4 rounded-xl border border-blue-100/50 bg-blue-50/50 backdrop-blur-sm">
+                  <h3 className="text-sm font-semibold text-blue-900 mb-3">Daily Updates</h3>
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-3">
+                      <div className="h-8 w-8 rounded-lg bg-blue-100 flex items-center justify-center">
+                        <ClipboardList className="h-4 w-4 text-blue-600" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs text-gray-500">Total Submissions</p>
+                        <p className="text-sm font-medium text-gray-900">{dailyUpdates.length}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="h-8 w-8 rounded-lg bg-blue-100 flex items-center justify-center">
+                        <CheckCircle className="h-4 w-4 text-blue-600" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs text-gray-500">Approved</p>
+                        <p className="text-sm font-medium text-gray-900">
+                          {dailyUpdates.filter((u: any) => u.adminApproved).length}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="h-8 w-8 rounded-lg bg-blue-100 flex items-center justify-center">
+                        <Clock className="h-4 w-4 text-blue-600" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs text-gray-500">Employee ID</p>
+                        <p className="text-xs font-mono text-gray-900 truncate">{profile._id}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -224,87 +267,119 @@ export default function EmployeeDetailModal({ employeeId, onClose }: Props) {
           {activeTab === 'attendance' && (
             <div>
               <div className="flex justify-between items-center mb-6">
-                <h3 className="text-lg font-medium text-gray-900">Attendance Records</h3>
+                <h3 className="text-lg font-medium text-gray-900">Daily Updates Attendance</h3>
                 <div className="text-sm text-gray-500">
-                  Showing {attendance.length} records
+                  {dailyUpdates.length} submissions
                 </div>
               </div>
 
-              {attendance.length > 0 ? (
-                <div className="overflow-hidden border border-gray-200 rounded-lg">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th
-                          scope="col"
-                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                        >
-                          Date & Time
-                        </th>
-                        <th
-                          scope="col"
-                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                        >
-                          Status
-                        </th>
-                        <th
-                          scope="col"
-                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                        >
-                          Work Details
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {attendance.map((record) => (
-                        <tr key={record._id} className="hover:bg-gray-50">
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            <div className="flex items-center">
-                              <Calendar className="flex-shrink-0 h-4 w-4 text-gray-400 mr-2" />
-                              {formatDate(record.date)}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            {record.status ? (
-                              <span
-                                className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                                  record.status === 'present'
-                                    ? 'bg-green-100 text-green-800'
-                                    : record.status === 'absent'
-                                    ? 'bg-red-100 text-red-800'
-                                    : 'bg-yellow-100 text-yellow-800'
-                                }`}
-                              >
-                                {record.status === 'present' ? (
-                                  <CheckCircle className="inline h-3 w-3 mr-1" />
-                                ) : record.status === 'absent' ? (
-                                  <XCircle className="inline h-3 w-3 mr-1" />
-                                ) : (
-                                  <ClockIcon className="inline h-3 w-3 mr-1" />
-                                )}
-                                {record.status.charAt(0).toUpperCase() + record.status.slice(1)}
-                              </span>
-                            ) : (
-                              <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
-                                <ClockIcon className="inline h-3 w-3 mr-1" />
-                                Pending
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-6 py-4 text-sm text-gray-500">
-                            {record.workDetails || 'No details provided'}
-                          </td>
-                        </tr>
+              {dailyUpdates.length > 0 ? (
+                <div className="space-y-6">
+                  {/* Calendar View */}
+                  <div className="bg-white p-6 rounded-lg border border-gray-200">
+                    <h4 className="font-medium text-gray-900 mb-4">Attendance Calendar</h4>
+                    <div className="grid grid-cols-7 gap-2">
+                      {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+                        <div key={day} className="text-center font-semibold text-gray-600 text-sm py-2">
+                          {day}
+                        </div>
                       ))}
-                    </tbody>
-                  </table>
+                      {(() => {
+                        const today = new Date();
+                        const currentMonth = today.getMonth();
+                        const currentYear = today.getFullYear();
+                        const firstDay = new Date(currentYear, currentMonth, 1);
+                        const lastDay = new Date(currentYear, currentMonth + 1, 0);
+                        const daysInMonth = lastDay.getDate();
+                        const startingDayOfWeek = firstDay.getDay();
+                        
+                        // Get all submission dates
+                        const submissionDates = new Set(
+                          dailyUpdates.map(update => {
+                            const date = new Date(update.date);
+                            return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+                          })
+                        );
+                        
+                        const days = [];
+                        
+                        // Empty cells for days before month starts
+                        for (let i = 0; i < startingDayOfWeek; i++) {
+                          days.push(<div key={`empty-${i}`} className="p-2"></div>);
+                        }
+                        
+                        // Days of the month
+                        for (let day = 1; day <= daysInMonth; day++) {
+                          const dateKey = `${currentYear}-${currentMonth}-${day}`;
+                          const hasSubmission = submissionDates.has(dateKey);
+                          
+                          days.push(
+                            <div
+                              key={day}
+                              className={`p-2 text-center rounded text-sm font-medium ${
+                                hasSubmission
+                                  ? 'bg-green-100 text-green-800 border-2 border-green-400'
+                                  : 'bg-gray-100 text-gray-600'
+                              }`}
+                            >
+                              {day}
+                            </div>
+                          );
+                        }
+                        
+                        return days;
+                      })()}
+                    </div>
+                    <div className="mt-4 flex gap-4 text-sm">
+                      <div className="flex items-center gap-2">
+                        <div className="w-4 h-4 bg-green-100 border-2 border-green-400 rounded"></div>
+                        <span>Submitted</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="w-4 h-4 bg-gray-100 rounded"></div>
+                        <span>No submission</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Detailed List */}
+                  <div className="bg-white p-6 rounded-lg border border-gray-200">
+                    <h4 className="font-medium text-gray-900 mb-4">Submission Details</h4>
+                    <div className="space-y-3">
+                      {dailyUpdates.map((update) => (
+                        <div key={update._id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                          <div className="flex items-center gap-3">
+                            <div className={`w-3 h-3 rounded-full ${update.adminApproved ? 'bg-green-500' : 'bg-yellow-500'}`}></div>
+                            <div>
+                              <p className="text-sm font-medium text-gray-900">
+                                {new Date(update.date).toLocaleDateString('en-US', { 
+                                  weekday: 'short', 
+                                  year: 'numeric', 
+                                  month: 'short', 
+                                  day: 'numeric' 
+                                })}
+                              </p>
+                              <p className="text-xs text-gray-500">{update.status}</p>
+                            </div>
+                          </div>
+                          <span className={`px-2 py-1 text-xs font-semibold rounded ${
+                            update.adminApproved
+                              ? 'bg-green-100 text-green-800'
+                              : 'bg-yellow-100 text-yellow-800'
+                          }`}>
+                            {update.adminApproved ? 'Approved' : 'Pending'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <div className="text-center py-12 border-2 border-dashed border-gray-300 rounded-lg">
                   <Calendar className="mx-auto h-12 w-12 text-gray-400" />
-                  <h3 className="mt-2 text-sm font-medium text-gray-900">No attendance records</h3>
+                  <h3 className="mt-2 text-sm font-medium text-gray-900">No daily updates</h3>
                   <p className="mt-1 text-sm text-gray-500">
-                    No attendance records found for this employee.
+                    No daily update submissions found for this employee.
                   </p>
                 </div>
               )}
@@ -327,7 +402,7 @@ export default function EmployeeDetailModal({ employeeId, onClose }: Props) {
                       key={update._id}
                       className="group border border-emerald-100/50 rounded-xl overflow-hidden bg-white/50 backdrop-blur-sm hover:border-emerald-200 hover:shadow-md transition-all duration-300"
                     >
-                      <div className="px-4 py-3 bg-gradient-to-r from-emerald-50 to-teal-50 border-b border-emerald-100/50">
+                      <div className="px-4 py-3 bg-linear-to-r from-emerald-50 to-teal-50 border-b border-emerald-100/50">
                         <div className="flex justify-between items-center">
                           <div className="flex items-center gap-2">
                             <div className="h-8 w-8 rounded-lg bg-emerald-100 flex items-center justify-center">

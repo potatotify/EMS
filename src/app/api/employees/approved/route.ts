@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
     const client = await clientPromise;
     const db = client.db('worknest');
 
-    // Get all approved employees
+    // Get all approved employees from users collection
     const employees = await db.collection('users')
       .find({ 
         role: 'employee',
@@ -23,7 +23,29 @@ export async function GET(request: NextRequest) {
       .project({ _id: 1, name: 1, email: 1 })
       .toArray();
 
-    return NextResponse.json({ employees });
+    // Fetch corresponding employeeProfiles to get skills
+    const userIds = employees.map((emp) => emp._id);
+
+    const profiles = await db.collection('employeeProfiles')
+      .find({ userId: { $in: userIds } })
+      .project({ userId: 1, skills: 1 })
+      .toArray();
+
+    const profileMap = new Map<string, any>(
+      profiles.map((p: any) => [p.userId.toString(), p])
+    );
+
+    const employeesWithSkills = employees.map((emp: any) => {
+      const profile = profileMap.get(emp._id.toString());
+      return {
+        _id: emp._id,
+        name: emp.name,
+        email: emp.email,
+        skills: profile?.skills || [],
+      };
+    });
+
+    return NextResponse.json({ employees: employeesWithSkills });
   } catch (error) {
     console.error('Error fetching employees:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

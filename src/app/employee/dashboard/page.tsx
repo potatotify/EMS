@@ -3,7 +3,7 @@
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { FolderKanban, Clock, TrendingUp, AlertCircle } from 'lucide-react';
+import { FolderKanban, Clock, TrendingUp, AlertCircle, Mail } from 'lucide-react';
 
 import Header from '@/components/shared/Header';
 import StatCard from '@/components/shared/StatCard';
@@ -11,7 +11,7 @@ import LoadingSpinner from '@/components/shared/LoadingSpinner';
 
 import ProjectProgressCard from '@/components/employee/ProjectProgressCard';
 import DailyUpdateModal from '@/components/employee/DailyUpdateModal';
-import AttendanceForm from '@/components/employee/AttendanceForm';
+import DailyUpdateForm from '@/components/employee/DailyUpdateForm';
 
 interface Project {
   _id: string;
@@ -32,6 +32,7 @@ export default function EmployeeDashboard() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const [unreadMessages, setUnreadMessages] = useState(0);
 
   useEffect(() => {
     if (status === 'authenticated') {
@@ -40,9 +41,22 @@ export default function EmployeeDashboard() {
         router.push('/employee/onboarding');
       } else {
         fetchProjects();
+        fetchUnreadMessages();
       }
     }
   }, [status, session, router]);
+
+  const fetchUnreadMessages = async () => {
+    try {
+      const res = await fetch('/api/employee/messages/unread-count');
+      const data = await res.json();
+      if (res.ok) {
+        setUnreadMessages(data.unread || 0);
+      }
+    } catch (err) {
+      console.error('Error fetching unread message count', err);
+    }
+  };
 
   const fetchProjects = async () => {
     try {
@@ -100,11 +114,29 @@ export default function EmployeeDashboard() {
 
   return (
     <div className="min-h-screen bg-[#F2FBF5]">
-      <Header title="Employee Dashboard" userName={session?.user?.name || ''} />
+      <Header
+        title="Employee Dashboard"
+        userName={session?.user?.name || ''}
+        rightActions={
+          <button
+            type="button"
+            onClick={() => router.push('/employee/messages')}
+            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700 text-xs font-medium hover:bg-emerald-100 border border-emerald-100"
+          >
+            <Mail className="w-4 h-4" />
+            <span>Messages</span>
+            {unreadMessages > 0 && (
+              <span className="ml-1 inline-flex items-center justify-center min-w-[18px] h-[18px] rounded-full bg-emerald-600 text-white text-[10px]">
+                {unreadMessages}
+              </span>
+            )}
+          </button>
+        }
+      />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           <StatCard
             title="Assigned Projects"
             value={projects.length}
@@ -126,10 +158,17 @@ export default function EmployeeDashboard() {
             iconBgColor="bg-purple-100"
             iconColor="text-purple-600"
           />
+          <StatCard
+            title="Messages"
+            value={unreadMessages}
+            icon={Mail}
+            iconBgColor="bg-amber-100"
+            iconColor="text-amber-600"
+          />
         </div>
 
-        {/* Attendance Form */}
-        <AttendanceForm  />
+        {/* Daily Update Form */}
+        <DailyUpdateForm />
 
         {/* Projects Section */}
         <div className="bg-white rounded-2xl shadow-lg border border-emerald-100 overflow-hidden mb-8">

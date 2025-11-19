@@ -7,9 +7,10 @@ import { useState, useEffect } from 'react';
 interface HeaderProps {
   title: string;
   userName: string;
+  rightActions?: React.ReactNode;
 }
 
-export default function Header({ title, userName }: HeaderProps) {
+export default function Header({ title, userName, rightActions }: HeaderProps) {
   const [isScrolled, setIsScrolled] = useState(false);
 
   useEffect(() => {
@@ -47,9 +48,11 @@ export default function Header({ title, userName }: HeaderProps) {
           </div>
 
           <div className="flex items-center gap-4">
-           
-            
-            
+            {rightActions && (
+              <div className="hidden sm:flex items-center gap-2">
+                {rightActions}
+              </div>
+            )}
 
             <div className="h-8 w-px bg-gray-200/50"></div>
 

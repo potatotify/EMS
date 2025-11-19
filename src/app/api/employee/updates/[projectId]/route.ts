@@ -6,11 +6,14 @@ import { ObjectId } from 'mongodb';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { projectId: string } }
+  context: { params: Promise<{ projectId: string }> }  // params is a Promise here
 ) {
+  const params = await context.params;  // await params to get projectId
+  const { projectId } = params;
+
   try {
     const session = await getServerSession(authOptions);
-    
+
     if (!session || session.user.role !== 'employee') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
@@ -19,12 +22,11 @@ export async function GET(
     const db = client.db('worknest');
 
     const updates = await db.collection('dailyUpdates')
-      .find({ 
-        projectId: new ObjectId(params.projectId),
+      .find({
+        projectId: new ObjectId(projectId),
         employeeId: new ObjectId(session.user.id)
       })
       .sort({ date: -1 })
-      .limit(10)
       .toArray();
 
     return NextResponse.json({ updates });

@@ -74,7 +74,7 @@ export default function EmployeeList({ onSelectEmployee }: EmployeeListProps) {
             <div className="relative flex items-center justify-between">
               <div className="flex-1">
                 <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white font-semibold text-sm">
+                  <div className="h-10 w-10 rounded-lg bg-linear-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white font-semibold text-sm">
                     {emp.fullName.charAt(0).toUpperCase()}
                   </div>
                   <div className="min-w-0 flex-1">
@@ -85,10 +85,7 @@ export default function EmployeeList({ onSelectEmployee }: EmployeeListProps) {
               </div>
               
               <div className="flex items-center gap-6 ml-4">
-                <div className="text-right">
-                  <p className="text-sm font-semibold text-emerald-600">{emp.attendanceCount}</p>
-                  <p className="text-xs text-gray-500">Attendance</p>
-                </div>
+                
                 <div className="text-right">
                   <p className="text-sm font-semibold text-teal-600">{emp.updatesCount}</p>
                   <p className="text-xs text-gray-500">Updates</p>

@@ -15,6 +15,9 @@ import ProjectAssignmentModal from '@/components/admin/ProjectAssignmentModal';
 import ProjectDetailsModal from '@/components/admin/ProjectDetailsModal';
 import EmployeeList from '@/components/admin/EmployeeList';
 import EmployeeDetailModal from '@/components/admin/EmployeeDetailModal';
+import DailyUpdatesReview from '@/components/admin/DailyUpdatesReview';
+import BonusLeaderboard from '@/components/admin/BonusLeaderboard';
+import AdminMessagesPanel from '@/components/admin/AdminMessagesPanel';
 
 interface PendingEmployee {
   _id: string;
@@ -230,6 +233,21 @@ export default function AdminDashboard() {
               </div>
             )}
           </div>
+        </div>
+
+        {/* Daily Updates Review Section */}
+        <div className="mt-8">
+          <DailyUpdatesReview />
+        </div>
+
+        {/* Bonus Leaderboard Section */}
+        <div className="mt-8">
+          <BonusLeaderboard />
+        </div>
+
+        {/* Admin Messages Section */}
+        <div className="mt-8">
+          <AdminMessagesPanel />
         </div>
       </main>
 
