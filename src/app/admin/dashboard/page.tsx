@@ -9,13 +9,18 @@ import {
   FolderKanban,
   RefreshCw,
   CheckCircle,
-  X
+  X,
+  Search,
+  TrendingUp,
+  Trophy,
+  MessageSquare
 } from "lucide-react";
 import {motion} from "framer-motion";
 
 import Header from "@/components/shared/Header";
 import StatCard from "@/components/shared/StatCard";
 import LoadingSpinner from "@/components/shared/LoadingSpinner";
+import CollapsibleSection from "@/components/shared/CollapsibleSection";
 
 import PendingEmployeeCard from "@/components/admin/PendingEmployeeCard";
 import ProjectListItem from "@/components/admin/ProjectListItem";
@@ -56,6 +61,7 @@ export default function AdminDashboard() {
     []
   );
   const [projects, setProjects] = useState<Project[]>([]);
+  const [projectSearch, setProjectSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
@@ -138,6 +144,11 @@ export default function AdminDashboard() {
   );
   const inProgressProjects = projects.filter((p) => p.status === "in_progress");
 
+  // Filter projects based on search
+  const filteredProjects = projects.filter((project) =>
+    project.projectName.toLowerCase().includes(projectSearch.toLowerCase())
+  );
+
   return (
     <div className="min-h-screen bg-linear-to-br from-slate-50 via-emerald-50/20 to-teal-50/30 relative overflow-hidden">
       {/* Animated background elements */}
@@ -152,11 +163,23 @@ export default function AdminDashboard() {
         />
       </div>
 
-      <Header title="Admin Dashboard" userName={session?.user?.name || ""} />
+      <Header
+        title="Admin Dashboard"
+        userName={session?.user?.name || ""}
+        rightActions={
+          <button
+            onClick={() => setShowEmployeeList(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 gradient-emerald text-white rounded-xl text-sm font-semibold shadow-md hover:shadow-lg transition-all duration-200 hover:opacity-90"
+          >
+            <Users className="w-4 h-4" />
+            View Employees
+          </button>
+        }
+      />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard
             title="Pending Approvals"
             value={pendingEmployees.length}
@@ -185,47 +208,25 @@ export default function AdminDashboard() {
             iconBgColor="bg-emerald-100"
             iconColor="text-emerald-600"
           />
-          <motion.div
-            whileHover={{scale: 1.02}}
-            className="rounded-2xl overflow-hidden border border-white/60 glass-effect p-6 shadow-lg hover:shadow-2xl transition-all duration-300 flex items-center justify-center group"
-          >
-            <button
-              className="w-full gradient-emerald hover:opacity-90 text-white rounded-xl px-4 py-3 font-semibold shadow-lg transition-all duration-300 hover:shadow-xl relative overflow-hidden group"
-              onClick={() => setShowEmployeeList(true)}
-            >
-              <div className="absolute inset-0 bg-white/0 group-hover:bg-white/10 transition-colors duration-300" />
-              <span className="relative z-10">View Employees</span>
-            </button>
-          </motion.div>
         </div>
 
         {/* Pending Employee Approvals */}
         {pendingEmployees.length > 0 && (
-          <motion.div
-            initial={{opacity: 0, y: 20}}
-            animate={{opacity: 1, y: 0}}
-            className="rounded-2xl overflow-hidden border border-white/60 glass-effect shadow-xl"
+          <CollapsibleSection
+            title="Pending Employee Approvals"
+            icon={Users}
+            defaultOpen={false}
           >
-            <div className="gradient-emerald px-6 py-5 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
-                  <Users className="w-5 h-5 text-white" />
-                </div>
-                <h2 className="text-xl font-bold text-white">
-                  Pending Employee Approvals
-                </h2>
-              </div>
+            <div className="space-y-4">
               <motion.button
                 whileHover={{scale: 1.05}}
                 whileTap={{scale: 0.95}}
                 onClick={fetchPendingEmployees}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded-xl text-sm font-semibold transition-all shadow-md hover:shadow-lg backdrop-blur-sm"
+                className="inline-flex items-center gap-2 px-4 py-2 gradient-emerald text-white rounded-xl text-sm font-semibold transition-all shadow-md hover:shadow-lg"
               >
                 <RefreshCw className="w-4 h-4" />
                 Refresh
               </motion.button>
-            </div>
-            <div className="p-6 space-y-4">
               {pendingEmployees.map((employee, index) => (
                 <motion.div
                   key={employee._id}
@@ -241,34 +242,38 @@ export default function AdminDashboard() {
                 </motion.div>
               ))}
             </div>
-          </motion.div>
+          </CollapsibleSection>
         )}
 
         {/* Projects Section */}
-        <motion.div
-          initial={{opacity: 0, y: 20}}
-          animate={{opacity: 1, y: 0}}
-          transition={{delay: 0.2}}
-          className="rounded-2xl overflow-hidden border border-white/60 glass-effect shadow-xl"
+        <CollapsibleSection
+          title="All Projects"
+          icon={<FolderKanban className="w-6 h-6 text-white" />}
+          defaultOpen={false}
         >
-          <div className="gradient-teal px-6 py-5 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
-                <FolderKanban className="w-5 h-5 text-white" />
-              </div>
-              <h2 className="text-xl font-bold text-white">All Projects</h2>
-            </div>
+          <div className="space-y-6">
             <motion.button
               whileHover={{scale: 1.05}}
               whileTap={{scale: 0.95}}
               onClick={fetchProjects}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded-xl text-sm font-semibold transition-all shadow-md hover:shadow-lg backdrop-blur-sm"
+              className="inline-flex items-center gap-2 px-4 py-2 gradient-emerald text-white rounded-xl text-sm font-semibold transition-all shadow-md hover:shadow-lg"
             >
               <RefreshCw className="w-4 h-4" />
               Refresh
             </motion.button>
-          </div>
-          <div className="p-6">
+
+            {/* Search Bar */}
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search projects by name..."
+                value={projectSearch}
+                onChange={(e) => setProjectSearch(e.target.value)}
+                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white/80 backdrop-blur-sm text-gray-900 placeholder-gray-500"
+              />
+            </div>
+
             {projects.length === 0 ? (
               <motion.div
                 initial={{opacity: 0, scale: 0.95}}
@@ -285,51 +290,57 @@ export default function AdminDashboard() {
               </motion.div>
             ) : (
               <div className="space-y-4">
-                {projects.map((project, index) => (
-                  <motion.div
-                    key={project._id}
-                    initial={{opacity: 0, x: -20}}
-                    animate={{opacity: 1, x: 0}}
-                    transition={{delay: index * 0.1}}
-                  >
-                    <ProjectListItem
-                      project={project}
-                      onAssign={setSelectedProject}
-                      onViewDetails={setViewProjectId}
-                    />
-                  </motion.div>
-                ))}
+                {filteredProjects.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500">
+                    No projects found matching "{projectSearch}"
+                  </div>
+                ) : (
+                  filteredProjects.map((project, index) => (
+                    <motion.div
+                      key={project._id}
+                      initial={{opacity: 0, x: -20}}
+                      animate={{opacity: 1, x: 0}}
+                      transition={{delay: index * 0.1}}
+                    >
+                      <ProjectListItem
+                        project={project}
+                        onAssign={setSelectedProject}
+                        onViewDetails={setViewProjectId}
+                      />
+                    </motion.div>
+                  ))
+                )}
               </div>
             )}
           </div>
-        </motion.div>
+        </CollapsibleSection>
 
         {/* Daily Updates Review Section */}
-        <motion.div
-          initial={{opacity: 0, y: 20}}
-          animate={{opacity: 1, y: 0}}
-          transition={{delay: 0.3}}
+        <CollapsibleSection
+          title="Daily Updates Review"
+          icon={<TrendingUp className="w-6 h-6 text-white" />}
+          defaultOpen={false}
         >
           <DailyUpdatesReview />
-        </motion.div>
+        </CollapsibleSection>
 
         {/* Bonus Leaderboard Section */}
-        <motion.div
-          initial={{opacity: 0, y: 20}}
-          animate={{opacity: 1, y: 0}}
-          transition={{delay: 0.4}}
+        <CollapsibleSection
+          title="Bonus Leaderboard"
+          icon={<Trophy className="w-6 h-6 text-white" />}
+          defaultOpen={false}
         >
           <BonusLeaderboard />
-        </motion.div>
+        </CollapsibleSection>
 
         {/* Admin Messages Section */}
-        <motion.div
-          initial={{opacity: 0, y: 20}}
-          animate={{opacity: 1, y: 0}}
-          transition={{delay: 0.5}}
+        <CollapsibleSection
+          title="Messages"
+          icon={<MessageSquare className="w-6 h-6 text-white" />}
+          defaultOpen={false}
         >
           <AdminMessagesPanel />
-        </motion.div>
+        </CollapsibleSection>
       </main>
 
       {/* Project Assignment Modal */}

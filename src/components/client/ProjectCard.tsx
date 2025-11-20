@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import { Eye } from 'lucide-react';
+import {Eye} from "lucide-react";
 
 interface Project {
   _id: string;
@@ -19,29 +19,46 @@ interface ProjectCardProps {
   onViewDetails?: (projectId: string) => void;
 }
 
-export default function ProjectCard({ project, onViewDetails }: ProjectCardProps) {
+export default function ProjectCard({
+  project,
+  onViewDetails
+}: ProjectCardProps) {
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'pending_assignment': return 'bg-amber-100 text-amber-800';
-      case 'in_progress': return 'bg-blue-100 text-blue-800';
-      case 'completed': return 'bg-emerald-100 text-emerald-800';
-      case 'on_hold': return 'bg-red-100 text-red-800';
-      default: return 'bg-gray-100 text-gray-800';
+      case "pending_assignment":
+        return "bg-amber-100 text-amber-800";
+      case "in_progress":
+        return "bg-yellow-100 text-yellow-800";
+      case "completed":
+        return "bg-green-100 text-green-800";
+      case "on_hold":
+        return "bg-red-100 text-red-800";
+      default:
+        return "bg-gray-100 text-gray-800";
     }
   };
 
   const getStatusText = (status: string) => {
-    return status.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+    return status
+      .split("_")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
   };
 
   return (
     <div className="p-5 border border-gray-200 rounded-xl hover:border-emerald-300 hover:bg-emerald-50/50 transition-all">
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1">
-          <h3 className="text-lg font-semibold text-gray-900">{project.projectName}</h3>
+          <h3 className="text-lg font-semibold text-gray-900">
+            {project.projectName}
+          </h3>
           <p className="text-sm text-gray-600 mt-1">{project.description}</p>
         </div>
-        <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(project.status)}`}>
+        <span
+          className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(
+            project.status
+          )}`}
+        >
           {getStatusText(project.status)}
         </span>
       </div>
@@ -51,12 +68,14 @@ export default function ProjectCard({ project, onViewDetails }: ProjectCardProps
         <div className="mb-4">
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm font-medium text-gray-700">Progress</span>
-            <span className="text-sm font-semibold text-emerald-700">{project.clientProgress}%</span>
+            <span className="text-sm font-semibold text-emerald-700">
+              {project.clientProgress}%
+            </span>
           </div>
           <div className="w-full bg-gray-200 rounded-full h-3">
             <div
               className="bg-linear-to-r from-emerald-500 to-emerald-600 h-3 rounded-full transition-all"
-              style={{ width: `${project.clientProgress}%` }}
+              style={{width: `${project.clientProgress}%`}}
             />
           </div>
         </div>
@@ -65,11 +84,15 @@ export default function ProjectCard({ project, onViewDetails }: ProjectCardProps
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mb-4">
         <div>
           <span className="text-gray-600">Start Date:</span>
-          <p className="font-medium text-gray-900">{new Date(project.startDate).toLocaleDateString()}</p>
+          <p className="font-medium text-gray-900">
+            {new Date(project.startDate).toLocaleDateString()}
+          </p>
         </div>
         <div>
           <span className="text-gray-600">Deadline:</span>
-          <p className="font-medium text-gray-900">{new Date(project.deadline).toLocaleDateString()}</p>
+          <p className="font-medium text-gray-900">
+            {new Date(project.deadline).toLocaleDateString()}
+          </p>
         </div>
         <div>
           <span className="text-gray-600">Budget:</span>
@@ -77,7 +100,9 @@ export default function ProjectCard({ project, onViewDetails }: ProjectCardProps
         </div>
         <div>
           <span className="text-gray-600">Created:</span>
-          <p className="font-medium text-gray-900">{new Date(project.createdAt).toLocaleDateString()}</p>
+          <p className="font-medium text-gray-900">
+            {new Date(project.createdAt).toLocaleDateString()}
+          </p>
         </div>
       </div>
 

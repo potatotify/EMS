@@ -8,6 +8,7 @@ import {motion} from "framer-motion";
 import Header from "@/components/shared/Header";
 import StatCard from "@/components/shared/StatCard";
 import LoadingSpinner from "@/components/shared/LoadingSpinner";
+import CollapsibleSection from "@/components/shared/CollapsibleSection";
 import CreateProjectModal from "@/components/client/CreateProjectModal";
 import ProjectCard from "@/components/client/ProjectCard";
 import ProjectDetailsModal from "@/components/client/ProjectDetailsModal";
@@ -124,54 +125,43 @@ export default function ClientDashboard() {
         </motion.div>
 
         {/* Projects List */}
-        <motion.div
-          initial={{opacity: 0, y: 20}}
-          animate={{opacity: 1, y: 0}}
-          transition={{delay: 0.2}}
-          className="glass-effect rounded-3xl shadow-2xl border border-white/40 overflow-hidden"
+        <CollapsibleSection
+          title="My Projects"
+          icon={<FolderKanban className="w-6 h-6 text-white" />}
+          defaultOpen={false}
         >
-          <div className="gradient-emerald px-6 py-5">
-            <h2 className="text-2xl font-bold text-white flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
-                <FolderKanban className="w-5 h-5" />
-              </div>
-              My Projects
-            </h2>
-          </div>
-          <div className="p-6">
-            {projects.length === 0 ? (
-              <motion.div
-                initial={{opacity: 0, scale: 0.95}}
-                animate={{opacity: 1, scale: 1}}
-                className="text-center py-16 border-2 border-dashed border-emerald-300/50 rounded-2xl bg-linear-to-br from-emerald-50/50 to-teal-50/50"
-              >
-                <FolderKanban className="w-20 h-20 text-emerald-400 mx-auto mb-4" />
-                <p className="text-lg font-bold text-slate-800 mb-2">
-                  No projects yet
-                </p>
-                <p className="text-slate-600">
-                  Create your first project to get started
-                </p>
-              </motion.div>
-            ) : (
-              <div className="space-y-4">
-                {projects.map((project, index) => (
-                  <motion.div
-                    key={project._id}
-                    initial={{opacity: 0, x: -20}}
-                    animate={{opacity: 1, x: 0}}
-                    transition={{delay: index * 0.1}}
-                  >
-                    <ProjectCard
-                      project={project}
-                      onViewDetails={setViewProjectId}
-                    />
-                  </motion.div>
-                ))}
-              </div>
-            )}
-          </div>
-        </motion.div>
+          {projects.length === 0 ? (
+            <motion.div
+              initial={{opacity: 0, scale: 0.95}}
+              animate={{opacity: 1, scale: 1}}
+              className="text-center py-16 border-2 border-dashed border-emerald-300/50 rounded-2xl bg-linear-to-br from-emerald-50/50 to-teal-50/50"
+            >
+              <FolderKanban className="w-20 h-20 text-emerald-400 mx-auto mb-4" />
+              <p className="text-lg font-bold text-slate-800 mb-2">
+                No projects yet
+              </p>
+              <p className="text-slate-600">
+                Create your first project to get started
+              </p>
+            </motion.div>
+          ) : (
+            <div className="space-y-4">
+              {projects.map((project, index) => (
+                <motion.div
+                  key={project._id}
+                  initial={{opacity: 0, x: -20}}
+                  animate={{opacity: 1, x: 0}}
+                  transition={{delay: index * 0.1}}
+                >
+                  <ProjectCard
+                    project={project}
+                    onViewDetails={setViewProjectId}
+                  />
+                </motion.div>
+              ))}
+            </div>
+          )}
+        </CollapsibleSection>
       </main>
 
       {/* Create Project Modal */}

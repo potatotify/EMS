@@ -76,7 +76,7 @@ export default function Header({title, userName, rightActions}: HeaderProps) {
               </div>
             )}
 
-            <div className="h-8 w-px bg-gradient-to-b from-transparent via-gray-300 to-transparent"></div>
+            <div className="h-8 w-px bg-linear-to-b from-transparent via-gray-300 to-transparent"></div>
 
             {/* User Avatar */}
             <div className="relative">

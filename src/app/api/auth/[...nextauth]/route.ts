@@ -4,6 +4,10 @@ import {MongoDBAdapter} from "@auth/mongodb-adapter";
 import {Adapter} from "next-auth/adapters";
 import clientPromise from "@/lib/mongodb";
 import {cookies} from "next/headers";
+import {scheduleAutoCleanup} from "@/lib/autoCleanup";
+
+// Initialize auto-cleanup on server startup
+scheduleAutoCleanup().catch(console.error);
 
 const ADMIN_EMAIL = "chiragkhati04@gmail.com";
 
@@ -25,8 +29,6 @@ const createCustomAdapter = () => {
       const isAdmin = user.email === ADMIN_EMAIL;
       const finalRole = isAdmin ? "admin" : selectedRole;
 
-      console.log("Creating new user with role:", finalRole);
-
       const userWithRole = {
         ...user,
         role: finalRole,
@@ -37,7 +39,6 @@ const createCustomAdapter = () => {
       };
 
       const createdUser = await originalCreateUser!(userWithRole);
-      console.log("User created:", createdUser.email, "Role:", finalRole);
 
       cookieStore.delete("signup-role");
 
@@ -69,18 +70,14 @@ export const authOptions: NextAuthOptions = {
 
         if (isSignupFlow) {
           if (existingUser) {
-            console.log("Signup blocked: User already exists -", user.email);
             cookieStore.delete("signup-role");
             return "/login?error=already_exists";
           }
-          console.log("Allowing new user signup:", user.email);
           return true;
         } else {
           if (!existingUser) {
-            console.log("Login blocked: User not found -", user.email);
             return "/signup?error=not_registered";
           }
-          console.log("Login successful:", user.email);
           return true;
         }
       } catch (error) {
@@ -103,12 +100,6 @@ export const authOptions: NextAuthOptions = {
           token.role = (dbUser as any).role || "employee";
           token.isApproved = (dbUser as any).isApproved || false;
           token.profileCompleted = (dbUser as any).profileCompleted || false;
-          console.log(
-            "JWT updated - User:",
-            dbUser.email,
-            "Profile completed:",
-            token.profileCompleted
-          );
         }
       }
       return token;

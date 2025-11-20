@@ -3,7 +3,15 @@
 import {useSession} from "next-auth/react";
 import {useRouter} from "next/navigation";
 import {useEffect, useState} from "react";
-import {FolderKanban, Clock, TrendingUp, AlertCircle, Mail} from "lucide-react";
+import {
+  FolderKanban,
+  Clock,
+  TrendingUp,
+  AlertCircle,
+  Mail,
+  CheckCircle,
+  ChevronDown
+} from "lucide-react";
 import {motion} from "framer-motion";
 
 import Header from "@/components/shared/Header";
@@ -13,6 +21,9 @@ import LoadingSpinner from "@/components/shared/LoadingSpinner";
 import ProjectProgressCard from "@/components/employee/ProjectProgressCard";
 import DailyUpdateModal from "@/components/employee/DailyUpdateModal";
 import DailyUpdateForm from "@/components/employee/DailyUpdateForm";
+import AttendanceModal from "@/components/employee/AttendanceForm";
+import EmployeeTasksSection from "@/components/employee/EmployeeTasksSection";
+import CollapsibleSection from "@/components/shared/CollapsibleSection";
 
 interface Project {
   _id: string;
@@ -34,6 +45,7 @@ export default function EmployeeDashboard() {
   const [loading, setLoading] = useState(true);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [unreadMessages, setUnreadMessages] = useState(0);
+  const [showAttendanceModal, setShowAttendanceModal] = useState(false);
 
   useEffect(() => {
     if (status === "authenticated") {
@@ -131,25 +143,37 @@ export default function EmployeeDashboard() {
         title="Employee Dashboard"
         userName={session?.user?.name || ""}
         rightActions={
-          <motion.button
-            whileHover={{scale: 1.05}}
-            whileTap={{scale: 0.95}}
-            type="button"
-            onClick={() => router.push("/employee/messages")}
-            className="relative inline-flex items-center gap-2 px-4 py-2 rounded-xl glass-effect border border-white/40 text-emerald-700 text-sm font-semibold hover:shadow-lg transition-all"
-          >
-            <Mail className="w-4 h-4" />
-            <span>Messages</span>
-            {unreadMessages > 0 && (
-              <motion.span
-                initial={{scale: 0}}
-                animate={{scale: 1}}
-                className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-[20px] h-[20px] rounded-full gradient-emerald text-white text-xs font-bold shadow-lg"
-              >
-                {unreadMessages}
-              </motion.span>
-            )}
-          </motion.button>
+          <div className="flex items-center gap-2">
+            <motion.button
+              whileHover={{scale: 1.05}}
+              whileTap={{scale: 0.95}}
+              type="button"
+              onClick={() => setShowAttendanceModal(true)}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl glass-effect border border-white/40 text-emerald-700 text-sm font-semibold hover:shadow-lg transition-all"
+            >
+              <CheckCircle className="w-4 h-4" />
+              <span>Mark Attendance</span>
+            </motion.button>
+            <motion.button
+              whileHover={{scale: 1.05}}
+              whileTap={{scale: 0.95}}
+              type="button"
+              onClick={() => router.push("/employee/messages")}
+              className="relative inline-flex items-center gap-2 px-4 py-2 rounded-xl glass-effect border border-white/40 text-emerald-700 text-sm font-semibold hover:shadow-lg transition-all"
+            >
+              <Mail className="w-4 h-4" />
+              <span>Messages</span>
+              {unreadMessages > 0 && (
+                <motion.span
+                  initial={{scale: 0}}
+                  animate={{scale: 1}}
+                  className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-5 h-5 rounded-full gradient-emerald text-white text-xs font-bold shadow-lg"
+                >
+                  {unreadMessages}
+                </motion.span>
+              )}
+            </motion.button>
+          </div>
         }
       />
 
@@ -186,56 +210,75 @@ export default function EmployeeDashboard() {
           />
         </div>
 
-        {/* Daily Update Form */}
-        <DailyUpdateForm />
+        {/* Daily Update Form - Collapsible */}
+        <CollapsibleSection
+          title="Submit Daily Update"
+          icon={<TrendingUp className="w-6 h-6 text-white" />}
+        >
+          <DailyUpdateForm />
+        </CollapsibleSection>
 
-        {/* Projects Section */}
-        <div className="bg-white rounded-2xl shadow-lg border border-emerald-100 overflow-hidden mb-8">
-          <div className="bg-linear-to-r from-emerald-600 to-emerald-700 px-6 py-4">
-            <h2 className="text-xl font-bold text-white">My Projects</h2>
-          </div>
-          <div className="p-6">
-            {projects.length === 0 ? (
-              <div className="text-center py-12">
-                <FolderKanban className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                <p className="text-lg font-semibold text-gray-900 mb-2">
-                  No projects assigned yet
-                </p>
-                <p className="text-gray-600">
-                  Projects assigned to you will appear here
-                </p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {projects.map((project) => (
-                  <ProjectProgressCard
-                    key={project._id}
-                    project={project}
-                    onUpdate={setSelectedProject}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
+        {/* Tasks Section - Collapsible */}
+        <CollapsibleSection
+          title="My Tasks"
+          icon={<CheckCircle className="w-6 h-6 text-white" />}
+        >
+          <EmployeeTasksSection />
+        </CollapsibleSection>
 
-        {/* Quick Tips */}
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-6">
-          <div className="flex items-start gap-3">
-            <AlertCircle className="w-6 h-6 text-blue-600 shrink-0 mt-0.5" />
-            <div>
-              <h3 className="font-semibold text-blue-900 mb-2">
-                Daily Update Tips
-              </h3>
-              <ul className="text-sm text-blue-800 space-y-1">
-                <li>• Submit your daily updates before end of day</li>
-                <li>• Be specific about tasks completed</li>
-                <li>• Report any blockers immediately</li>
-                <li>• Update progress percentage accurately</li>
-              </ul>
+        {/* Projects Section - Collapsible */}
+        <CollapsibleSection
+          title="My Projects"
+          icon={<FolderKanban className="w-6 h-6 text-white" />}
+        >
+          {projects.length === 0 ? (
+            <div className="text-center py-12">
+              <FolderKanban className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+              <p className="text-lg font-semibold text-gray-900 mb-2">
+                No projects assigned yet
+              </p>
+              <p className="text-gray-600">
+                Projects assigned to you will appear here
+              </p>
             </div>
-          </div>
-        </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {projects.map((project) => (
+                <ProjectProgressCard
+                  key={project._id}
+                  project={project}
+                  onUpdate={setSelectedProject}
+                />
+              ))}
+            </div>
+          )}
+        </CollapsibleSection>
+
+        {/* Quick Tips - Collapsible */}
+        <CollapsibleSection
+          title="Daily Update Tips"
+          icon={<AlertCircle className="w-6 h-6 text-white" />}
+          headerColor="from-blue-600 to-blue-700"
+        >
+          <ul className="text-sm text-gray-700 space-y-2">
+            <li className="flex items-start gap-2">
+              <span className="text-blue-600 font-bold">•</span>
+              <span>Submit your daily updates before end of day</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-blue-600 font-bold">•</span>
+              <span>Be specific about tasks completed</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-blue-600 font-bold">•</span>
+              <span>Report any blockers immediately</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-blue-600 font-bold">•</span>
+              <span>Update progress percentage accurately</span>
+            </li>
+          </ul>
+        </CollapsibleSection>
       </main>
 
       {/* Daily Update Modal */}
@@ -246,6 +289,16 @@ export default function EmployeeDashboard() {
           onSuccess={() => {
             setSelectedProject(null);
             alert("Update submitted successfully!");
+          }}
+        />
+      )}
+
+      {/* Attendance Modal */}
+      {showAttendanceModal && (
+        <AttendanceModal
+          onClose={() => setShowAttendanceModal(false)}
+          onSuccess={() => {
+            setShowAttendanceModal(false);
           }}
         />
       )}

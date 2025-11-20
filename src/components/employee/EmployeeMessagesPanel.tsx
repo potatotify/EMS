@@ -1,14 +1,14 @@
-'use client';
+"use client";
 
-import { useEffect, useState } from 'react';
-import { Mail, Loader, User, Shield } from 'lucide-react';
+import {useEffect, useState} from "react";
+import {Mail, Loader, User, Shield} from "lucide-react";
 
 interface Message {
   _id: string;
   senderId: string;
   receiverId: string;
-  senderRole: 'admin' | 'employee';
-  receiverRole: 'admin' | 'employee';
+  senderRole: "admin" | "employee";
+  receiverRole: "admin" | "employee";
   message: string;
   createdAt: string;
 }
@@ -16,20 +16,20 @@ interface Message {
 export default function EmployeeMessagesPanel() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
-  const [reply, setReply] = useState('');
+  const [reply, setReply] = useState("");
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
 
   const fetchMessages = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/employee/messages');
+      const res = await fetch("/api/employee/messages");
       const data = await res.json();
       if (res.ok) {
         setMessages(data.messages || []);
       }
     } catch (err) {
-      console.error('Error fetching messages', err);
+      console.error("Error fetching messages", err);
     } finally {
       setLoading(false);
     }
@@ -44,22 +44,22 @@ export default function EmployeeMessagesPanel() {
     setSending(true);
     setStatus(null);
     try {
-      const res = await fetch('/api/employee/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: reply }),
+      const res = await fetch("/api/employee/messages", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({message: reply})
       });
       const data = await res.json();
       if (res.ok) {
-        setReply('');
-        setStatus('Reply sent to admin');
+        setReply("");
+        setStatus("Reply sent to admin");
         await fetchMessages();
       } else {
-        setStatus(data.error || 'Failed to send reply');
+        setStatus(data.error || "Failed to send reply");
       }
     } catch (err) {
-      console.error('Error sending reply', err);
-      setStatus('Failed to send reply');
+      console.error("Error sending reply", err);
+      setStatus("Failed to send reply");
     } finally {
       setSending(false);
     }
@@ -75,24 +75,29 @@ export default function EmployeeMessagesPanel() {
         <div className="max-h-64 overflow-y-auto border border-emerald-50 rounded-xl p-3 bg-emerald-50/40">
           {loading ? (
             <div className="flex items-center justify-center py-6 text-gray-500 text-sm">
-              <Loader className="w-4 h-4 mr-2 animate-spin" /> Loading messages...
+              <Loader className="w-4 h-4 mr-2 animate-spin" /> Loading
+              messages...
             </div>
           ) : messages.length === 0 ? (
-            <p className="text-sm text-gray-500">No messages yet. Admin messages will appear here.</p>
+            <p className="text-sm text-gray-500">
+              No messages yet. Admin messages will appear here.
+            </p>
           ) : (
             <div className="space-y-3 text-sm">
               {messages.map((msg) => {
-                const isAdmin = msg.senderRole === 'admin';
+                const isAdmin = msg.senderRole === "admin";
                 return (
                   <div
                     key={msg._id}
-                    className={`flex ${isAdmin ? 'justify-start' : 'justify-end'}`}
+                    className={`flex ${
+                      isAdmin ? "justify-start" : "justify-end"
+                    }`}
                   >
                     <div
                       className={`max-w-[75%] rounded-xl px-3 py-2 shadow-sm border text-sm ${
                         isAdmin
-                          ? 'bg-white border-emerald-100 text-gray-900'
-                          : 'bg-emerald-600 border-emerald-700 text-white'
+                          ? "bg-white border-emerald-100 text-gray-900"
+                          : "bg-emerald-600 border-emerald-700 text-white"
                       }`}
                     >
                       <div className="flex items-center gap-1 mb-1 text-[11px] opacity-80">
@@ -110,12 +115,14 @@ export default function EmployeeMessagesPanel() {
                         <span className="mx-1">·</span>
                         <span>
                           {new Date(msg.createdAt).toLocaleString(undefined, {
-                            dateStyle: 'short',
-                            timeStyle: 'short',
+                            dateStyle: "short",
+                            timeStyle: "short"
                           })}
                         </span>
                       </div>
-                      <p className="whitespace-pre-wrap break-words">{msg.message}</p>
+                      <p className="whitespace-pre-wrap wrap-break-word">
+                        {msg.message}
+                      </p>
                     </div>
                   </div>
                 );
@@ -125,7 +132,9 @@ export default function EmployeeMessagesPanel() {
         </div>
 
         <div className="border-t border-gray-100 pt-4">
-          <h3 className="text-sm font-semibold text-gray-900 mb-2">Reply to Admin</h3>
+          <h3 className="text-sm font-semibold text-gray-900 mb-2">
+            Reply to Admin
+          </h3>
           <textarea
             rows={3}
             value={reply}
