@@ -214,7 +214,7 @@ export default function AdminDashboard() {
         {pendingEmployees.length > 0 && (
           <CollapsibleSection
             title="Pending Employee Approvals"
-            icon={Users}
+            icon={<Users className="w-6 h-6 text-white" />}
             defaultOpen={false}
           >
             <div className="space-y-4">
