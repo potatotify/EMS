@@ -145,6 +145,7 @@ export async function GET(request: Request) {
 
     const updates = await DailyUpdate.find(query)
       .sort({date: -1})
+      .limit(100) // Limit to 100 records to prevent slowdowns
       .populate("employeeId", "name email");
 
     return NextResponse.json(updates);

@@ -77,6 +77,7 @@ export default function DailyUpdatesReview() {
 
   useEffect(() => {
     fetchUpdates();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterDate, filterEmployee]);
 
   const fetchUpdates = async () => {

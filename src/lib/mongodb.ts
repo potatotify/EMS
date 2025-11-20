@@ -1,17 +1,23 @@
-import { MongoClient } from 'mongodb';
-import mongoose from 'mongoose';
+import {MongoClient} from "mongodb";
+import mongoose from "mongoose";
 
 if (!process.env.MONGODB_URI) {
-  throw new Error('Please add your MONGODB_URI to .env.local');
+  throw new Error("Please add your MONGODB_URI to .env.local");
 }
 
 const uri = process.env.MONGODB_URI;
-const options = {};
+const options = {
+  maxPoolSize: 10,
+  minPoolSize: 2,
+  serverSelectionTimeoutMS: 5000,
+  socketTimeoutMS: 45000,
+  connectTimeoutMS: 10000
+};
 
 let client: MongoClient;
 let clientPromise: Promise<MongoClient>;
 
-if (process.env.NODE_ENV === 'development') {
+if (process.env.NODE_ENV === "development") {
   // In development mode, use a global variable to preserve the client across hot reloads
   let globalWithMongo = global as typeof globalThis & {
     _mongoClientPromise?: Promise<MongoClient>;
@@ -41,7 +47,7 @@ interface Cached {
 let mongooseCache: Cached = (global as any).mongoose;
 
 if (!mongooseCache) {
-  mongooseCache = (global as any).mongoose = { conn: null, promise: null };
+  mongooseCache = (global as any).mongoose = {conn: null, promise: null};
 }
 
 export async function dbConnect() {
@@ -52,11 +58,16 @@ export async function dbConnect() {
   if (!mongooseCache.promise) {
     const opts = {
       bufferCommands: false,
+      maxPoolSize: 10,
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000
     };
 
-    mongooseCache.promise = mongoose.connect(MONGODB_URI, opts).then((mongoose) => {
-      return mongoose;
-    });
+    mongooseCache.promise = mongoose
+      .connect(MONGODB_URI, opts)
+      .then((mongoose) => {
+        return mongoose;
+      });
   }
 
   try {

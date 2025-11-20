@@ -65,6 +65,7 @@ export default function ProjectDetailsModal({
     fetchProjectDetails();
     fetchMessages();
     fetchMeetings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   const fetchProjectDetails = async () => {

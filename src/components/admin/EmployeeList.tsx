@@ -28,11 +28,14 @@ export default function EmployeeList({onSelectEmployee}: EmployeeListProps) {
     try {
       const response = await fetch("/api/admin/employees");
       const data = await response.json();
-      if (response.ok) {
+      if (response.ok && data.employees) {
         setEmployees(data.employees);
+      } else {
+        setEmployees([]);
       }
     } catch (error) {
       console.error("Failed to fetch employees", error);
+      setEmployees([]);
     } finally {
       setLoading(false);
     }
@@ -94,15 +97,6 @@ export default function EmployeeList({onSelectEmployee}: EmployeeListProps) {
                       {emp.email}
                     </p>
                   </div>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-6 ml-4">
-                <div className="text-right">
-                  <p className="text-sm font-semibold text-teal-600">
-                    {emp.updatesCount}
-                  </p>
-                  <p className="text-xs text-gray-500">Updates</p>
                 </div>
               </div>
             </div>

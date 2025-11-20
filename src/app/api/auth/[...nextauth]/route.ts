@@ -4,12 +4,8 @@ import {MongoDBAdapter} from "@auth/mongodb-adapter";
 import {Adapter} from "next-auth/adapters";
 import clientPromise from "@/lib/mongodb";
 import {cookies} from "next/headers";
-import {scheduleAutoCleanup} from "@/lib/autoCleanup";
 
-// Initialize auto-cleanup on server startup
-scheduleAutoCleanup().catch(console.error);
-
-const ADMIN_EMAIL = "chiragkhati04@gmail.com";
+const ADMIN_EMAILS = ["chiragkhati04@gmail.com", "zprootech@gmail.com"];
 
 const createCustomAdapter = () => {
   const adapter = MongoDBAdapter(clientPromise);
@@ -18,31 +14,36 @@ const createCustomAdapter = () => {
   return {
     ...adapter,
     createUser: async (user: any) => {
-      const cookieStore = await cookies();
-      const roleCookie = cookieStore.get("signup-role");
+      try {
+        const cookieStore = await cookies();
+        const roleCookie = cookieStore.get("signup-role");
 
-      if (!roleCookie) {
-        throw new Error("Account not found. Please sign up first.");
+        if (!roleCookie) {
+          throw new Error("Account not found. Please sign up first.");
+        }
+
+        const selectedRole = roleCookie.value;
+        const isAdmin = ADMIN_EMAILS.includes(user.email?.toLowerCase() || "");
+        const finalRole = isAdmin ? "admin" : selectedRole;
+
+        const userWithRole = {
+          ...user,
+          role: finalRole,
+          isApproved: finalRole !== "employee",
+          approvedAt: finalRole !== "employee" ? new Date() : null,
+          approvedBy: finalRole !== "employee" ? "system" : null,
+          profileCompleted: finalRole === "admin" // Admin doesn't need onboarding
+        };
+
+        const createdUser = await originalCreateUser!(userWithRole);
+
+        cookieStore.delete("signup-role");
+
+        return createdUser;
+      } catch (error) {
+        console.error("Error creating user:", error);
+        throw error;
       }
-
-      const selectedRole = roleCookie.value;
-      const isAdmin = user.email === ADMIN_EMAIL;
-      const finalRole = isAdmin ? "admin" : selectedRole;
-
-      const userWithRole = {
-        ...user,
-        role: finalRole,
-        isApproved: finalRole !== "employee",
-        approvedAt: finalRole !== "employee" ? new Date() : null,
-        approvedBy: finalRole !== "employee" ? "system" : null,
-        profileCompleted: finalRole === "admin" // Admin doesn't need onboarding
-      };
-
-      const createdUser = await originalCreateUser!(userWithRole);
-
-      cookieStore.delete("signup-role");
-
-      return createdUser;
     }
   };
 };

@@ -13,18 +13,33 @@ export async function GET(
     const params = await context.params;
     const {employeeId} = params;
 
+    console.log("Received employeeId:", employeeId);
+
     const session = await getServerSession();
     if (!session?.user) {
       return NextResponse.json({error: "Unauthorized"}, {status: 401});
     }
 
+    // Connect to DB first
+    await dbConnect();
     const client = await clientPromise;
     const db = client.db("worknest");
 
-    // Check if admin
-    const adminSession = await User.findOne({email: session.user.email});
-    if (!adminSession || adminSession.role !== "admin") {
+    // Check if admin using MongoDB native driver instead of Mongoose
+    const adminUser = await db
+      .collection("users")
+      .findOne({email: session.user.email});
+    if (!adminUser || adminUser.role !== "admin") {
       return NextResponse.json({error: "Forbidden"}, {status: 403});
+    }
+
+    // Validate ObjectId format
+    if (!ObjectId.isValid(employeeId)) {
+      console.error("Invalid ObjectId format:", employeeId);
+      return NextResponse.json(
+        {error: "Invalid employee ID format"},
+        {status: 400}
+      );
     }
 
     // Find employee profile by _id
@@ -32,23 +47,33 @@ export async function GET(
       _id: new ObjectId(employeeId)
     });
 
+    console.log("Found profile:", profile ? "Yes" : "No");
+
     if (!profile) {
       return NextResponse.json({error: "Employee not found"}, {status: 404});
     }
-
-    // Now fetch daily updates and user email using Mongoose
-    await dbConnect();
 
     // The userId from employeeProfile is the actual user ID in our system
     const dailyUpdates = await DailyUpdate.find({employeeId: profile.userId})
       .sort({date: -1})
       .limit(30);
 
-    // Fetch user to get email
-    const user = await User.findById(profile.userId);
+    // Fetch attendance records
+    const attendanceRecords = await db
+      .collection("attendance")
+      .find({userId: profile.userId})
+      .sort({date: -1})
+      .limit(30)
+      .toArray();
+
+    // Fetch user to get email using native MongoDB driver
+    const user = await db
+      .collection("users")
+      .findOne({_id: new ObjectId(profile.userId)});
     const userEmail = user?.email || profile.email || "";
 
     console.log("Found daily updates:", dailyUpdates.length);
+    console.log("Found attendance records:", attendanceRecords.length);
     console.log("User email:", userEmail);
 
     // Return profile and daily updates
@@ -58,9 +83,18 @@ export async function GET(
         fullName: profile.fullName || "Employee",
         email: userEmail,
         designation: profile.designation || "Employee",
-        department: profile.department || "Engineering"
+        department: profile.department || "Engineering",
+        phone: profile.phone || "",
+        joiningDate: profile.createdAt || profile.joiningDate || ""
       },
-      attendanceRecords: [],
+      attendanceRecords: attendanceRecords.map((record: any) => ({
+        _id: record._id,
+        userId: record.userId,
+        date: record.date,
+        workDetails: record.workDetails || "",
+        status: record.status || "present",
+        createdAt: record.createdAt || record.date
+      })),
       dailyUpdates: dailyUpdates.map((update: any) => ({
         _id: update._id,
         date: update.date,

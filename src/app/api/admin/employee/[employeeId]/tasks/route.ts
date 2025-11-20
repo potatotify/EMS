@@ -111,12 +111,22 @@ export async function GET(
       return NextResponse.json({error: "Employee not found"}, {status: 404});
     }
 
-    // Fetch tasks using userId
+    // Convert userId to string for consistent querying
+    const userIdString =
+      typeof employeeProfile.userId === "string"
+        ? employeeProfile.userId
+        : employeeProfile.userId.toString();
+
+    console.log("Fetching tasks for userId:", userIdString);
+
+    // Fetch tasks using userId as string
     const tasks = await db
       .collection("employeeTasks")
-      .find({employeeId: employeeProfile.userId})
+      .find({employeeId: userIdString})
       .sort({assignedAt: -1})
       .toArray();
+
+    console.log("Found tasks:", tasks.length);
 
     return NextResponse.json({tasks});
   } catch (error) {

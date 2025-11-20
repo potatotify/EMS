@@ -93,6 +93,7 @@ export default function EmployeeDetailModal({employeeId, onClose}: Props) {
   useEffect(() => {
     fetchEmployeeDetails();
     fetchTasks();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [employeeId]);
 
   const fetchEmployeeDetails = async () => {

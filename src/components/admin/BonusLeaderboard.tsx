@@ -21,6 +21,7 @@ export default function BonusLeaderboard() {
 
   useEffect(() => {
     fetchLeaderboard();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [period]);
 
   const fetchLeaderboard = async () => {
