@@ -6,17 +6,15 @@ import {
   Users,
   UserCircle,
   Briefcase,
-  FileText,
+  Trophy,
   ChevronRight
 } from "lucide-react";
 
 export default function Home() {
-  // Just update the roles array hrefs:
   const roles = [
     {
       title: "Client",
-      description:
-        "Monitor project timelines, milestones, and real-time progress updates",
+      description: "Monitor project timelines, milestones, and real-time progress updates",
       icon: Briefcase,
       href: "/signup?role=client",
       color: "#10B981",
@@ -24,8 +22,7 @@ export default function Home() {
     },
     {
       title: "Employee",
-      description:
-        "Access your projects, submit daily updates, and track your progress",
+      description: "Access your projects, submit daily updates, and track your progress",
       icon: UserCircle,
       href: "/signup?role=employee",
       color: "#059669",
@@ -33,20 +30,19 @@ export default function Home() {
     },
     {
       title: "Admin",
-      description:
-        "Complete control over projects, employees, clients, and system operations",
+      description: "Complete control over projects, employees, clients, and system operations",
       icon: Users,
       href: "/login?role=admin",
       color: "#064E3B",
       available: true
     },
     {
-      title: "Applicant",
-      description: "Submit your application and track your hiring journey",
-      icon: FileText,
-      href: "#",
+      title: "Hackathons",
+      description: "Participate in hackathons, showcase your skills, and win prizes",
+      icon: Trophy,
+      href: "/signup?role=hackathon",
       color: "#34D399",
-      available: false
+      available: true
     }
   ];
 

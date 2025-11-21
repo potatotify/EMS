@@ -29,10 +29,10 @@ const createCustomAdapter = () => {
         const userWithRole = {
           ...user,
           role: finalRole,
-          isApproved: finalRole !== "employee",
-          approvedAt: finalRole !== "employee" ? new Date() : null,
-          approvedBy: finalRole !== "employee" ? "system" : null,
-          profileCompleted: finalRole === "admin" // Admin doesn't need onboarding
+          isApproved: finalRole !== "employee" && finalRole !== "hackathon",
+          approvedAt: finalRole !== "employee" && finalRole !== "hackathon" ? new Date() : null,
+          approvedBy: finalRole !== "employee" && finalRole !== "hackathon" ? "system" : null,
+          profileCompleted: finalRole === "admin" // Admin doesn't need onboarding, hackathon users need onboarding
         };
 
         const createdUser = await originalCreateUser!(userWithRole);
@@ -110,7 +110,7 @@ export const authOptions: NextAuthOptions = {
       if (session.user) {
         session.user.id = token.id as string;
         session.user.role =
-          (token.role as "admin" | "employee" | "client") || "employee";
+          (token.role as "admin" | "employee" | "client" | "hackathon") || "employee";
         (session.user as any).isApproved = token.isApproved || false;
         (session.user as any).profileCompleted =
           token.profileCompleted || false;

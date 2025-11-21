@@ -23,9 +23,9 @@ export async function POST(request: NextRequest) {
       {
         $set: {
           leadAssignee: data.leadAssignee ? new ObjectId(data.leadAssignee) : null,
-          vaIncharge: data.vaIncharge || null,
+          vaIncharge: data.vaIncharge ? new ObjectId(data.vaIncharge) : null,
           freelancer: data.freelancer || null,
-          updateIncharge: data.updateIncharge || null,
+          updateIncharge: data.updateIncharge ? new ObjectId(data.updateIncharge) : null,
           codersRecommendation: data.codersRecommendation || null,
           leadership: data.leadership || null,
           githubLink: data.githubLink || null,

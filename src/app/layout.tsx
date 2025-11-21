@@ -1,13 +1,15 @@
 import type {Metadata} from "next";
-import {Poppins} from "next/font/google";
+import {Inter} from "next/font/google";
 
 import "./globals.css";
+import "../styles/design-system.css";
 import AuthProvider from "@/components/providers/SessionProvider";
 
-const poppins = Poppins({
+const inter = Inter({
   subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700", "800", "900"],
-  variable: "--font-poppins"
+  weight: ["300", "400", "500", "600", "700", "800"],
+  variable: "--font-inter",
+  display: "swap"
 });
 
 export const metadata: Metadata = {
@@ -36,11 +38,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={poppins.variable} suppressHydrationWarning>
+    <html lang="en" className={inter.variable} suppressHydrationWarning>
       <head>
         <link rel="icon" href="/favicon.ico" />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
       </head>
-      <body className="font-poppins antialiased overflow-x-hidden">
+      <body className="font-inter antialiased overflow-x-hidden bg-neutral-50 text-neutral-900">
         <AuthProvider>
           <div className="relative min-h-screen">{children}</div>
         </AuthProvider>

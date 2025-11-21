@@ -4,50 +4,13 @@ import {useState, useEffect} from "react";
 import {useSession} from "next-auth/react";
 
 interface DailyUpdateFormData {
-  // Daily Updates
-  attendedMorningSession: boolean;
-  cameOnTime: boolean;
+  // Essential Daily Updates
   workedOnProject: boolean;
-  askedForNewProject: boolean;
-  gotCodeCorrected: boolean;
-  updatedClient: boolean;
-  workedOnTrainingTask: boolean;
-  updatedSeniorTeam: boolean;
   updatedDailyProgress: boolean;
-  plannedNextDayTask: boolean;
-  completedAllTasks: boolean;
-  workedOnMultipleProjects: boolean;
-  tasksForTheDay: string;
-
-  // Project Management
-  informedUnableToComplete: boolean;
-  ensuredProjectReassigned: boolean;
-  ensuredProjectOnTime: boolean;
-  informedBeforeBunking: boolean;
-  informedBeforeLate: boolean;
-  informedLeavingMeeting: boolean;
-
-  // Freelancer Management
-  freelancerNeeded: boolean;
-  ensuredFreelancerHired: boolean;
-
-  // Communication
-  addedToWhatsAppGroup: boolean;
-  slackGroupCreated: boolean;
-
-  // Project Management (continued)
-  projectAssignedToSomeoneElse: boolean;
-  supervisor: string;
-  projectInPriority: boolean;
-  followedUpWithClient: boolean;
-  completedAllProjectTasks: boolean;
-  setTaskDeadlines: boolean;
   recordedLoomVideos: boolean;
-  organizedLoomVideos: boolean;
-  metDeadlines: boolean;
-  screenShared: boolean;
-
-  // Additional Info
+  updatedClient: boolean;
+  completedAllTasks: boolean;
+  tasksForTheDay: string;
   hoursWorked: number;
   additionalNotes: string;
 }
@@ -55,39 +18,12 @@ interface DailyUpdateFormData {
 export default function DailyUpdateForm() {
   const {data: session} = useSession();
   const [formData, setFormData] = useState<DailyUpdateFormData>({
-    attendedMorningSession: false,
-    cameOnTime: false,
     workedOnProject: false,
-    askedForNewProject: false,
-    gotCodeCorrected: false,
-    updatedClient: false,
-    workedOnTrainingTask: false,
-    updatedSeniorTeam: false,
     updatedDailyProgress: false,
-    plannedNextDayTask: false,
-    completedAllTasks: false,
-    workedOnMultipleProjects: false,
-    tasksForTheDay: "",
-    informedUnableToComplete: false,
-    ensuredProjectReassigned: false,
-    ensuredProjectOnTime: false,
-    informedBeforeBunking: false,
-    informedBeforeLate: false,
-    informedLeavingMeeting: false,
-    freelancerNeeded: false,
-    ensuredFreelancerHired: false,
-    addedToWhatsAppGroup: false,
-    slackGroupCreated: false,
-    projectAssignedToSomeoneElse: false,
-    supervisor: "",
-    projectInPriority: false,
-    followedUpWithClient: false,
-    completedAllProjectTasks: false,
-    setTaskDeadlines: false,
     recordedLoomVideos: false,
-    organizedLoomVideos: false,
-    metDeadlines: false,
-    screenShared: false,
+    updatedClient: false,
+    completedAllTasks: false,
+    tasksForTheDay: "",
     hoursWorked: 0,
     additionalNotes: ""
   });
@@ -113,7 +49,17 @@ export default function DailyUpdateForm() {
         });
 
         if (todaysUpdate) {
-          setFormData(todaysUpdate);
+          // Map only the essential fields
+          setFormData({
+            workedOnProject: todaysUpdate.workedOnProject || false,
+            updatedDailyProgress: todaysUpdate.updatedDailyProgress || false,
+            recordedLoomVideos: todaysUpdate.recordedLoomVideos || false,
+            updatedClient: todaysUpdate.updatedClient || false,
+            completedAllTasks: todaysUpdate.completedAllTasks || false,
+            tasksForTheDay: todaysUpdate.tasksForTheDay || "",
+            hoursWorked: todaysUpdate.hoursWorked || 0,
+            additionalNotes: todaysUpdate.additionalNotes || ""
+          });
           setHasSubmittedToday(true);
         }
       } catch (error) {
@@ -152,12 +98,45 @@ export default function DailyUpdateForm() {
     setMessage(null);
 
     try {
+      // Submit only essential fields, set all others to false/default
+      const submitData = {
+        ...formData,
+        // Set all other fields to false/default for backward compatibility
+        attendedMorningSession: false,
+        cameOnTime: false,
+        askedForNewProject: false,
+        gotCodeCorrected: false,
+        workedOnTrainingTask: false,
+        updatedSeniorTeam: false,
+        plannedNextDayTask: false,
+        workedOnMultipleProjects: false,
+        informedUnableToComplete: false,
+        ensuredProjectReassigned: false,
+        ensuredProjectOnTime: false,
+        informedBeforeBunking: false,
+        informedBeforeLate: false,
+        informedLeavingMeeting: false,
+        freelancerNeeded: false,
+        ensuredFreelancerHired: false,
+        addedToWhatsAppGroup: false,
+        slackGroupCreated: false,
+        projectAssignedToSomeoneElse: false,
+        supervisor: "",
+        projectInPriority: false,
+        followedUpWithClient: false,
+        completedAllProjectTasks: false,
+        setTaskDeadlines: false,
+        organizedLoomVideos: false,
+        metDeadlines: false,
+        screenShared: false
+      };
+
       const response = await fetch("/api/daily-updates", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify(formData)
+        body: JSON.stringify(submitData)
       });
 
       if (!response.ok) {
@@ -200,13 +179,6 @@ export default function DailyUpdateForm() {
     </div>
   );
 
-  const renderSection = (title: string, children: React.ReactNode) => (
-    <div className="bg-white p-6 rounded-lg shadow mb-6">
-      <h3 className="text-lg font-medium text-gray-900 mb-4">{title}</h3>
-      <div className="space-y-4">{children}</div>
-    </div>
-  );
-
   return (
     <>
       <div className="flex justify-start mb-4">
@@ -238,39 +210,26 @@ export default function DailyUpdateForm() {
         </div>
       ) : (
         <form onSubmit={handleSubmit} className="space-y-6">
-          {renderSection(
-            "Daily Updates",
-            <>
+          <div className="bg-white p-6 rounded-lg shadow mb-6">
+            <h3 className="text-lg font-medium text-gray-900 mb-4">Daily Updates</h3>
+            <div className="space-y-4">
               <div className="space-y-1">
                 {renderCheckbox(
-                  "attendedMorningSession",
-                  "Attended morning session"
+                  "workedOnProject",
+                  "Worked on my project"
                 )}
-                {renderCheckbox("cameOnTime", "Came on time")}
-                {renderCheckbox("workedOnProject", "Worked on my project")}
-                {renderCheckbox(
-                  "askedForNewProject",
-                  "Asked senior team for new Project"
-                )}
-                {renderCheckbox("gotCodeCorrected", "Got code corrected")}
-                {renderCheckbox("updatedClient", "Updated client")}
-                {renderCheckbox(
-                  "workedOnTrainingTask",
-                  "Worked on training task"
-                )}
-                {renderCheckbox("updatedSeniorTeam", "Updated Senior Team")}
                 {renderCheckbox(
                   "updatedDailyProgress",
-                  "Updated Daily Progress"
+                  "Updated Daily Progress (GForm)"
                 )}
-                {renderCheckbox("plannedNextDayTask", "Plan Next day's task")}
+                {renderCheckbox(
+                  "recordedLoomVideos",
+                  "Recorded Loom Videos"
+                )}
+                {renderCheckbox("updatedClient", "Updated client")}
                 {renderCheckbox(
                   "completedAllTasks",
-                  "Completed all task for the day"
-                )}
-                {renderCheckbox(
-                  "workedOnMultipleProjects",
-                  "Worked on more than 1 project (if assigned)"
+                  "Completed all tasks for the day"
                 )}
               </div>
 
@@ -289,118 +248,16 @@ export default function DailyUpdateForm() {
                   onChange={handleChange}
                   className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-emerald-500 focus:border-emerald-500 sm:text-sm"
                   disabled={hasSubmittedToday}
-                />
-              </div>
-            </>
-          )}
-
-          {renderSection(
-            "Project Management",
-            <div className="space-y-1">
-              {renderCheckbox(
-                "informedUnableToComplete",
-                "Did you inform you are not able to do the project?"
-              )}
-              {renderCheckbox(
-                "ensuredProjectReassigned",
-                "Did you make sure project was given to someone else?"
-              )}
-              {renderCheckbox(
-                "ensuredProjectOnTime",
-                "Did you make sure project was on time?"
-              )}
-              {renderCheckbox(
-                "informedBeforeBunking",
-                "Did you inform before bunking the day before?"
-              )}
-              {renderCheckbox(
-                "informedBeforeLate",
-                "Did you inform before coming late?"
-              )}
-              {renderCheckbox(
-                "informedLeavingMeeting",
-                "Did you inform when you left the meeting?"
-              )}
-              {renderCheckbox(
-                "freelancerNeeded",
-                "Is freelancer needed for this project?"
-              )}
-              {renderCheckbox(
-                "ensuredFreelancerHired",
-                "Did you make sure freelancer was hired?"
-              )}
-              {renderCheckbox(
-                "addedToWhatsAppGroup",
-                "Did you make sure you have been added to client's WhatsApp group on the same day?"
-              )}
-              {renderCheckbox(
-                "slackGroupCreated",
-                "Has the Slack group been made for this project?"
-              )}
-              {renderCheckbox(
-                "projectAssignedToSomeoneElse",
-                "Check if it has been assigned to somebody else already?"
-              )}
-
-              <div>
-                <label
-                  htmlFor="supervisor"
-                  className="block text-sm font-medium text-gray-700 mb-1"
-                >
-                  Choose your own supervisor
-                </label>
-                <input
-                  type="text"
-                  id="supervisor"
-                  name="supervisor"
-                  value={formData.supervisor}
-                  onChange={handleChange}
-                  className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-emerald-500 focus:border-emerald-500 sm:text-sm"
-                  disabled={hasSubmittedToday}
+                  placeholder="Describe your tasks for today..."
                 />
               </div>
 
-              {renderCheckbox(
-                "projectInPriority",
-                "Check if the project assigned is still on and in priority"
-              )}
-              {renderCheckbox(
-                "followedUpWithClient",
-                "Have you taken follow up from the client?"
-              )}
-              {renderCheckbox(
-                "completedAllProjectTasks",
-                "Have you made all the tasks for the project?"
-              )}
-              {renderCheckbox(
-                "setTaskDeadlines",
-                "Did you assign deadlines for each task?"
-              )}
-              {renderCheckbox(
-                "recordedLoomVideos",
-                "Did you record all the relevant Loom videos?"
-              )}
-              {renderCheckbox(
-                "organizedLoomVideos",
-                "Did you organize Loom videos?"
-              )}
-              {renderCheckbox("metDeadlines", "Was deadline followed?")}
-              {renderCheckbox(
-                "screenShared",
-                "Were you screensharing and working at all times?"
-              )}
-            </div>
-          )}
-
-          {renderSection(
-            "Additional Information",
-            <div className="space-y-4">
               <div>
                 <label
                   htmlFor="hoursWorked"
                   className="block text-sm font-medium text-gray-700 mb-1"
                 >
-                  No. of hours attended today
+                  Hours worked today
                 </label>
                 <input
                   type="number"
@@ -414,6 +271,7 @@ export default function DailyUpdateForm() {
                   className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-emerald-500 focus:border-emerald-500 sm:text-sm"
                   disabled={hasSubmittedToday}
                   placeholder="e.g., 8"
+                  required
                 />
               </div>
 
@@ -422,7 +280,7 @@ export default function DailyUpdateForm() {
                   htmlFor="additionalNotes"
                   className="block text-sm font-medium text-gray-700 mb-1"
                 >
-                  Additional Notes
+                  Additional Notes (Optional)
                 </label>
                 <textarea
                   id="additionalNotes"
@@ -436,7 +294,7 @@ export default function DailyUpdateForm() {
                 />
               </div>
             </div>
-          )}
+          </div>
 
           {!hasSubmittedToday && (
             <div className="flex justify-end">

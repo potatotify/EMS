@@ -30,18 +30,49 @@ export async function GET(
       return NextResponse.json({ error: 'Project not found' }, { status: 404 });
     }
 
+    // Helper function to populate employee details
+    const populateEmployee = async (employeeId: any) => {
+      if (!employeeId) return null;
+      try {
+        const employee = await db.collection('users').findOne({
+          _id: new ObjectId(employeeId)
+        });
+        if (employee) {
+          return {
+            _id: employee._id.toString(),
+            name: employee.name,
+            email: employee.email
+          };
+        }
+      } catch (error) {
+        // If not a valid ObjectId, might be a string (legacy data)
+        if (typeof employeeId === 'string') {
+          return { _id: employeeId, name: employeeId, email: "" };
+        }
+      }
+      return null;
+    };
+
     // Populate lead assignee details if exists
     if (project.leadAssignee) {
-      const employee = await db.collection('users').findOne({
-        _id: new ObjectId(project.leadAssignee),
-      });
-      if (employee) {
+      project.leadAssignee = await populateEmployee(project.leadAssignee) || project.leadAssignee;
+      if (typeof project.leadAssignee === 'object' && project.leadAssignee._id) {
         project.leadAssigneeDetails = {
-          _id: employee._id,
-          name: employee.name,
-          email: employee.email,
+          _id: project.leadAssignee._id,
+          name: project.leadAssignee.name,
+          email: project.leadAssignee.email,
         };
       }
+    }
+
+    // Populate VA Incharge
+    if (project.vaIncharge) {
+      project.vaIncharge = await populateEmployee(project.vaIncharge) || project.vaIncharge;
+    }
+
+    // Populate Update Incharge
+    if (project.updateIncharge) {
+      project.updateIncharge = await populateEmployee(project.updateIncharge) || project.updateIncharge;
     }
 
     return NextResponse.json({ project });

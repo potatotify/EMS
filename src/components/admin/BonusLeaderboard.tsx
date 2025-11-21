@@ -1,218 +1,477 @@
 "use client";
 
-import {useState, useEffect} from "react";
-import {TrendingUp, Award} from "lucide-react";
+import { useState, useEffect } from "react";
+import { TrendingUp, Award, Edit2, Save, X, AlertCircle, CheckCircle, Calculator, RefreshCw } from "lucide-react";
+import { motion } from "framer-motion";
 
-interface EmployeeScore {
+interface BonusFineCalculation {
   employeeId: string;
   employeeName: string;
   email: string;
-  totalScore: number;
-  updatesCount: number;
-  averageScore: number;
-  rank: number;
-  bonusAmount?: number;
+  productsCount: number;
+  attendanceHours: number;
+  absentDays: number;
+  dailyUpdatesCount: number;
+  missingDailyUpdates: number;
+  missingTeamMeetings: number;
+  missingInternalMeetings: number;
+  missingClientMeetings: number;
+  completedProjects: number;
+  approvedClientProjects: number;
+  isProjectLead: boolean;
+  isInTraining: boolean;
+  monthsWorked: number;
+  hasDailyLoomAndGForm: boolean;
+  baseBonus: number;
+  productsBonus: number;
+  attendanceBonus140: number;
+  attendanceBonus160: number;
+  attendanceBonus200: number;
+  dailyLoomGFormBonus: number;
+  loyaltyBonus: number;
+  completedProjectsBonus: number;
+  hackathonBonus: number;
+  fresherBonus: number;
+  totalBonus: number;
+  missingDailyUpdatesFine: number;
+  missingTeamMeetingsFine: number;
+  missingInternalMeetingsFine: number;
+  missingClientMeetingsFine: number;
+  absenceFines: number;
+  totalFine: number;
+  netAmount: number;
+  noPaymentConditions: string[];
+  noFineConditions: string[];
+  manualBonus?: number;
+  manualFine?: number;
+  adminNotes?: string;
+  approvedByCoreTeam?: boolean;
 }
 
-export default function BonusLeaderboard() {
-  const [leaderboard, setLeaderboard] = useState<EmployeeScore[]>([]);
+interface BonusLeaderboardProps {
+  readOnly?: boolean;
+}
+
+export default function BonusLeaderboard({ readOnly = false }: BonusLeaderboardProps) {
+  const [calculations, setCalculations] = useState<BonusFineCalculation[]>([]);
   const [loading, setLoading] = useState(true);
-  const [period, setPeriod] = useState<"daily" | "weekly" | "monthly">("daily");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editData, setEditData] = useState<{
+    manualBonus?: number;
+    manualFine?: number;
+    adminNotes?: string;
+    approvedByCoreTeam?: boolean;
+  }>({});
 
   useEffect(() => {
-    fetchLeaderboard();
+    fetchCalculations();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [period]);
+  }, []);
 
-  const fetchLeaderboard = async () => {
+  const fetchCalculations = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`/api/leaderboard?period=${period}`);
+      // Always use monthly period for bonus/fine calculations
+      const response = await fetch(`/api/admin/bonus-fine/all`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({period: 'monthly'})
+      });
       const data = await response.json();
-      setLeaderboard(Array.isArray(data) ? data : []);
+      if (response.ok && data.calculations) {
+        // Sort by net amount descending
+        const sorted = data.calculations.sort((a: BonusFineCalculation, b: BonusFineCalculation) => 
+          b.netAmount - a.netAmount
+        );
+        setCalculations(sorted);
+      } else {
+        setCalculations([]);
+      }
     } catch (error) {
-      console.error("Error fetching leaderboard:", error);
-      setLeaderboard([]);
+      console.error("Error fetching calculations:", error);
+      setCalculations([]);
     } finally {
       setLoading(false);
     }
   };
 
-  const getMedalEmoji = (rank: number) => {
-    if (rank === 1) return "🥇";
-    if (rank === 2) return "🥈";
-    if (rank === 3) return "🥉";
-    return "🏅";
+  const handleEdit = (calc: BonusFineCalculation) => {
+    setEditingId(calc.employeeId);
+    setEditData({
+      manualBonus: calc.manualBonus,
+      manualFine: calc.manualFine,
+      adminNotes: calc.adminNotes || '',
+      approvedByCoreTeam: calc.approvedByCoreTeam || false
+    });
   };
 
-  const getRankColor = (rank: number) => {
-    if (rank === 1) return "bg-yellow-50 border-l-4 border-yellow-400";
-    if (rank === 2) return "bg-gray-50 border-l-4 border-gray-400";
-    if (rank === 3) return "bg-orange-50 border-l-4 border-orange-400";
-    return "bg-white border-l-4 border-emerald-200";
+  const handleSave = async (employeeId: string) => {
+    try {
+      const response = await fetch('/api/admin/bonus-fine', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          employeeId,
+          period: 'monthly', // Always use monthly
+          ...editData
+        })
+      });
+
+      if (response.ok) {
+        await fetchCalculations();
+        setEditingId(null);
+        setEditData({});
+      } else {
+        alert('Failed to save changes');
+      }
+    } catch (error) {
+      console.error('Error saving:', error);
+      alert('Failed to save changes');
+    }
   };
 
-  const calculateBonus = (averageScore: number, rank: number): number => {
-    // Base bonus calculation: higher scores get higher bonuses
-    let bonus = 0;
-
-    if (averageScore >= 90) bonus = 5000;
-    else if (averageScore >= 80) bonus = 4000;
-    else if (averageScore >= 70) bonus = 3000;
-    else if (averageScore >= 60) bonus = 2000;
-    else if (averageScore >= 50) bonus = 1000;
-
-    // Rank multiplier
-    if (rank === 1) bonus *= 1.5;
-    else if (rank === 2) bonus *= 1.25;
-    else if (rank === 3) bonus *= 1.1;
-
-    return Math.round(bonus);
+  const handleCancel = () => {
+    setEditingId(null);
+    setEditData({});
   };
+
+  const getStatusColor = (netAmount: number, noPaymentConditions: string[]) => {
+    if (noPaymentConditions.length > 0) return 'bg-red-50 border-red-200';
+    if (netAmount < 0) return 'bg-orange-50 border-orange-200';
+    if (netAmount === 0) return 'bg-gray-50 border-gray-200';
+    return 'bg-green-50 border-green-200';
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="text-center">
+          <div className="w-8 h-8 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-sm text-gray-600">Calculating bonuses and fines...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <>
-      <div className="flex items-center justify-start mb-6">
-        <div className="flex gap-2">
-          {(["daily", "weekly", "monthly"] as const).map((p) => (
-            <button
-              key={p}
-              onClick={() => setPeriod(p)}
-              className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all shadow-md ${
-                period === p
-                  ? "bg-emerald-600 text-white"
-                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-              }`}
-            >
-              {p.charAt(0).toUpperCase() + p.slice(1)}
-            </button>
-          ))}
+    <div className="space-y-6">
+      {/* Header Controls */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="bg-emerald-100 rounded-lg px-4 py-2 border border-emerald-200">
+            <p className="text-sm font-semibold text-emerald-700">
+              Monthly Calculation
+            </p>
+            <p className="text-xs text-emerald-600">
+              {new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+            </p>
+          </div>
+        </div>
+        {!readOnly && (
+          <motion.button
+            whileHover={{scale: 1.05}}
+            whileTap={{scale: 0.95}}
+            onClick={fetchCalculations}
+            className="inline-flex items-center gap-2 px-4 py-2 gradient-emerald text-white rounded-xl text-sm font-semibold transition-all shadow-md hover:shadow-lg"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Recalculate All
+          </motion.button>
+        )}
+      </div>
+
+      {/* Summary Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="bg-green-50 rounded-xl p-4 border border-green-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600">Total Bonuses</p>
+              <p className="text-2xl font-bold text-green-700">
+                ₹{calculations.reduce((sum, c) => sum + c.totalBonus, 0).toLocaleString()}
+              </p>
+            </div>
+            <Award className="w-8 h-8 text-green-600" />
+          </div>
+        </div>
+        <div className="bg-red-50 rounded-xl p-4 border border-red-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600">Total Fines</p>
+              <p className="text-2xl font-bold text-red-700">
+                ₹{calculations.reduce((sum, c) => sum + c.totalFine, 0).toLocaleString()}
+              </p>
+            </div>
+            <AlertCircle className="w-8 h-8 text-red-600" />
+          </div>
+        </div>
+        <div className="bg-blue-50 rounded-xl p-4 border border-blue-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600">Net Amount</p>
+              <p className="text-2xl font-bold text-blue-700">
+                ₹{calculations.reduce((sum, c) => sum + c.netAmount, 0).toLocaleString()}
+              </p>
+            </div>
+            <Calculator className="w-8 h-8 text-blue-600" />
+          </div>
+        </div>
+        <div className="bg-purple-50 rounded-xl p-4 border border-purple-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600">Employees</p>
+              <p className="text-2xl font-bold text-purple-700">{calculations.length}</p>
+            </div>
+            <TrendingUp className="w-8 h-8 text-purple-600" />
+          </div>
         </div>
       </div>
-      <div className="bg-white">
+
+      {/* Calculations Table */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="overflow-x-auto">
-          {loading ? (
-            <div className="px-6 py-12 text-center text-gray-500">
-              Loading leaderboard...
-            </div>
-          ) : leaderboard.length === 0 ? (
-            <div className="px-6 py-12 text-center">
-              <p className="text-gray-500 mb-2">
-                No approved daily updates found for this period
-              </p>
-              <p className="text-sm text-gray-400">
-                Admins need to approve employee daily updates for them to appear
-                in the leaderboard. Go to "Daily Updates Review" to approve
-                submissions.
-              </p>
-            </div>
-          ) : (
-            <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-200">
+          <table className="w-full min-w-[1600px]">
+            <thead className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase">Employee</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase">Metrics</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase">Base</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase">Bonuses</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase">Fines</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase">Net</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase">Status</th>
+                {!readOnly && (
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase">Actions</th>
+                )}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {calculations.length === 0 ? (
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Rank
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Employee
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Email
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Updates
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Average Score
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Total Score
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Bonus Amount
-                  </th>
+                  <td colSpan={readOnly ? 7 : 8} className="px-6 py-12 text-center text-gray-500">
+                    No calculations found. Click "Recalculate All" to generate bonus/fine calculations.
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {leaderboard.map((employee) => {
-                  const bonus = calculateBonus(
-                    employee.averageScore,
-                    employee.rank
-                  );
+              ) : (
+                calculations.map((calc) => {
+                  const isEditing = editingId === calc.employeeId;
                   return (
-                    <tr
-                      key={employee.employeeId}
-                      className={`${getRankColor(
-                        employee.rank
-                      )} transition-colors hover:bg-opacity-75`}
+                    <motion.tr
+                      key={calc.employeeId}
+                      initial={{opacity: 0, y: 10}}
+                      animate={{opacity: 1, y: 0}}
+                      className={`${getStatusColor(calc.netAmount, calc.noPaymentConditions)} border-l-4 transition-colors hover:bg-opacity-75`}
                     >
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center gap-2">
-                          <span className="text-2xl">
-                            {getMedalEmoji(employee.rank)}
-                          </span>
-                          <span className="text-lg font-bold text-gray-900">
-                            #{employee.rank}
-                          </span>
+                      {/* Employee Info */}
+                      <td className="px-4 py-3">
+                        <div>
+                          <p className="font-semibold text-gray-900">{calc.employeeName}</p>
+                          <p className="text-xs text-gray-500">{calc.email}</p>
+                          {calc.isProjectLead && (
+                            <span className="inline-block mt-1 px-2 py-0.5 bg-purple-100 text-purple-700 rounded text-xs font-medium">
+                              Project Lead (2x)
+                            </span>
+                          )}
+                          {calc.isInTraining && (
+                            <span className="inline-block mt-1 px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-medium">
+                              Training
+                            </span>
+                          )}
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-gray-900">
-                          {employee.employeeName}
+
+                      {/* Metrics */}
+                      <td className="px-4 py-3 text-sm">
+                        <div className="space-y-1">
+                          <p>Products: <span className="font-semibold">{calc.productsCount}</span></p>
+                          <p>Attendance: <span className="font-semibold">{calc.attendanceHours}h</span></p>
+                          <p>Absent: <span className="font-semibold">{calc.absentDays}d</span></p>
+                          <p>Updates: <span className="font-semibold">{calc.dailyUpdatesCount}</span></p>
+                          <p>Months: <span className="font-semibold">{calc.monthsWorked}</span></p>
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-500">
-                          {employee.email}
+
+                      {/* Base */}
+                      <td className="px-4 py-3 text-sm">
+                        <div className="text-center">
+                          <p className="font-bold text-blue-700 text-lg">
+                            ₹{calc.baseBonus.toLocaleString()}
+                          </p>
+                          <p className="text-xs text-gray-500 mt-1">Base Salary</p>
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="inline-flex items-center px-2 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
-                          {employee.updatesCount}
+
+                      {/* Bonuses */}
+                      <td className="px-4 py-3 text-sm">
+                        <div className="space-y-1">
+                          {calc.productsBonus > 0 && (
+                            <p>Products: <span className="font-semibold text-green-700">₹{calc.productsBonus}</span></p>
+                          )}
+                          {calc.attendanceBonus140 > 0 && (
+                            <p>Att 140+: <span className="font-semibold text-green-700">₹{calc.attendanceBonus140}</span></p>
+                          )}
+                          {calc.attendanceBonus160 > 0 && (
+                            <p>Att 160+: <span className="font-semibold text-green-700">₹{calc.attendanceBonus160}</span></p>
+                          )}
+                          {calc.attendanceBonus200 > 0 && (
+                            <p>Att 200+: <span className="font-semibold text-green-700">₹{calc.attendanceBonus200}</span></p>
+                          )}
+                          {calc.dailyLoomGFormBonus > 0 && (
+                            <p>Loom/GForm: <span className="font-semibold text-green-700">₹{calc.dailyLoomGFormBonus}</span></p>
+                          )}
+                          {calc.loyaltyBonus > 0 && (
+                            <p>Loyalty: <span className="font-semibold text-green-700">₹{calc.loyaltyBonus}</span></p>
+                          )}
+                          {calc.completedProjectsBonus > 0 && (
+                            <p>Projects: <span className="font-semibold text-green-700">₹{calc.completedProjectsBonus}</span></p>
+                          )}
+                          {calc.isProjectLead && (
+                            <p className="text-xs text-purple-600 font-medium mt-1">
+                              (2x multiplier applied)
+                            </p>
+                          )}
+                          <p className="pt-1 border-t font-bold text-green-800">
+                            Total Bonuses: ₹{calc.totalBonus.toLocaleString()}
+                          </p>
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center gap-2">
-                          <div className="w-24 bg-gray-200 rounded-full h-2">
-                            <div
-                              className={`h-2 rounded-full ${
-                                employee.averageScore >= 90
-                                  ? "bg-green-600"
-                                  : employee.averageScore >= 80
-                                  ? "bg-emerald-600"
-                                  : employee.averageScore >= 70
-                                  ? "bg-yellow-600"
-                                  : "bg-orange-600"
-                              }`}
-                              style={{width: `${employee.averageScore}%`}}
-                            ></div>
+
+                      {/* Fines */}
+                      <td className="px-4 py-3 text-sm">
+                        {calc.noFineConditions.length > 0 ? (
+                          <div className="text-green-600 font-medium">
+                            No Fines
+                            <p className="text-xs text-gray-500 mt-1">
+                              {calc.noFineConditions.join(', ')}
+                            </p>
                           </div>
-                          <span className="text-sm font-medium text-gray-900 w-12">
-                            {employee.averageScore.toFixed(1)}%
-                          </span>
+                        ) : (
+                          <div className="space-y-1">
+                            {calc.missingDailyUpdatesFine > 0 && (
+                              <p>Daily Updates: <span className="font-semibold text-red-700">₹{calc.missingDailyUpdatesFine}</span></p>
+                            )}
+                            {calc.missingTeamMeetingsFine > 0 && (
+                              <p>Team Meetings: <span className="font-semibold text-red-700">₹{calc.missingTeamMeetingsFine}</span></p>
+                            )}
+                            {calc.missingInternalMeetingsFine > 0 && (
+                              <p>Internal Meetings: <span className="font-semibold text-red-700">₹{calc.missingInternalMeetingsFine}</span></p>
+                            )}
+                            {calc.missingClientMeetingsFine > 0 && (
+                              <p>Client Meetings: <span className="font-semibold text-red-700">₹{calc.missingClientMeetingsFine}</span></p>
+                            )}
+                            {calc.absenceFines !== 0 && (
+                              <p>Absence: <span className={`font-semibold ${
+                                calc.absenceFines < 0 ? 'text-green-700' : 'text-red-700'
+                              }`}>₹{calc.absenceFines}</span></p>
+                            )}
+                            {calc.isProjectLead && (
+                              <p className="text-xs text-purple-600 font-medium mt-1">
+                                (2x multiplier applied)
+                              </p>
+                            )}
+                            <p className="pt-1 border-t font-bold text-red-800">
+                              Total Fines: ₹{calc.totalFine.toLocaleString()}
+                            </p>
+                          </div>
+                        )}
+                      </td>
+
+                      {/* Net Amount */}
+                      <td className="px-4 py-3 text-sm">
+                        <div className="text-center">
+                          <p className={`font-bold text-lg ${
+                            calc.netAmount >= 0 ? 'text-green-700' : 'text-red-700'
+                          }`}>
+                            ₹{calc.netAmount.toLocaleString()}
+                          </p>
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-emerald-100 text-emerald-800">
-                          {employee.totalScore}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center gap-2">
-                          <Award className="w-5 h-5 text-yellow-600" />
-                          <span className="text-sm font-bold text-gray-900">
-                            ₹{bonus.toLocaleString()}
-                          </span>
+
+                      {/* Status */}
+                      <td className="px-4 py-3 text-sm">
+                        <div className="space-y-1">
+                          {calc.noPaymentConditions.length > 0 && (
+                            <div className="flex items-center gap-1 text-red-600">
+                              <AlertCircle className="w-4 h-4" />
+                              <span className="text-xs font-medium">No Payment</span>
+                            </div>
+                          )}
+                          {calc.approvedByCoreTeam && (
+                            <div className="flex items-center gap-1 text-green-600">
+                              <CheckCircle className="w-4 h-4" />
+                              <span className="text-xs font-medium">Approved</span>
+                            </div>
+                          )}
                         </div>
                       </td>
-                    </tr>
+
+                      {/* Actions */}
+                      {!readOnly && (
+                        <td className="px-4 py-3">
+                          {isEditing ? (
+                            <div className="space-y-2">
+                              <input
+                                type="number"
+                                placeholder="Manual Bonus"
+                                value={editData.manualBonus || ''}
+                                onChange={(e) => setEditData({...editData, manualBonus: parseFloat(e.target.value) || undefined})}
+                                className="w-full px-2 py-1 text-xs border rounded"
+                              />
+                              <input
+                                type="number"
+                                placeholder="Manual Fine"
+                                value={editData.manualFine || ''}
+                                onChange={(e) => setEditData({...editData, manualFine: parseFloat(e.target.value) || undefined})}
+                                className="w-full px-2 py-1 text-xs border rounded"
+                              />
+                              <textarea
+                                placeholder="Admin Notes"
+                                value={editData.adminNotes || ''}
+                                onChange={(e) => setEditData({...editData, adminNotes: e.target.value})}
+                                className="w-full px-2 py-1 text-xs border rounded"
+                                rows={2}
+                              />
+                              <div className="flex items-center gap-1">
+                                <input
+                                  type="checkbox"
+                                  checked={editData.approvedByCoreTeam || false}
+                                  onChange={(e) => setEditData({...editData, approvedByCoreTeam: e.target.checked})}
+                                  className="w-3 h-3"
+                                />
+                                <label className="text-xs">Core Team Approved</label>
+                              </div>
+                              <div className="flex gap-1">
+                                <button
+                                  onClick={() => handleSave(calc.employeeId)}
+                                  className="p-1 bg-green-500 text-white rounded text-xs"
+                                >
+                                  <Save className="w-3 h-3" />
+                                </button>
+                                <button
+                                  onClick={handleCancel}
+                                  className="p-1 bg-red-500 text-white rounded text-xs"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => handleEdit(calc)}
+                              className="p-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                            >
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </td>
+                      )}
+                    </motion.tr>
                   );
-                })}
-              </tbody>
-            </table>
-          )}
+                })
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
-    </>
+    </div>
   );
 }

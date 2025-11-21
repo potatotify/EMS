@@ -18,6 +18,8 @@ export default async function DashboardPage() {
     redirect('/employee/dashboard');
   } else if (role === 'client') {
     redirect('/client/dashboard');
+  } else if (role === 'hackathon') {
+    redirect('/hackathon/dashboard');
   }
 
   // Default fallback

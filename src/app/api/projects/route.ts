@@ -34,13 +34,21 @@ export async function GET(request: NextRequest) {
         .limit(100)
         .toArray();
     } else if (session.user.role === "employee") {
-      // Employee sees projects assigned to them
+      // Employee sees projects assigned to them (as lead, VA incharge, or update incharge)
+      const user = await db.collection("users").findOne({
+        _id: new ObjectId(session.user.id)
+      });
+      const userName = user?.name || "";
+      
       projects = await db
         .collection("projects")
         .find({
           $or: [
             {leadAssignee: new ObjectId(session.user.id)},
-            {updateIncharge: session.user.name}
+            {vaIncharge: new ObjectId(session.user.id)},
+            {updateIncharge: new ObjectId(session.user.id)},
+            // Legacy support: also check by name (for old data)
+            {updateIncharge: userName}
           ]
         })
         .sort({createdAt: -1})
@@ -48,7 +56,49 @@ export async function GET(request: NextRequest) {
         .toArray();
     }
 
-    return NextResponse.json({projects});
+    // Helper function to populate employee details
+    const populateEmployee = async (employeeId: any) => {
+      if (!employeeId) return null;
+      try {
+        const employee = await db.collection("users").findOne({
+          _id: new ObjectId(employeeId)
+        });
+        if (employee) {
+          return {
+            _id: employee._id.toString(),
+            name: employee.name,
+            email: employee.email
+          };
+        }
+      } catch (error) {
+        // If not a valid ObjectId, might be a string (legacy data)
+        if (typeof employeeId === 'string') {
+          return { _id: employeeId, name: employeeId, email: "" };
+        }
+      }
+      return null;
+    };
+
+    // Populate employee details for all projects
+    const populatedProjects = await Promise.all(
+      (projects || []).map(async (project) => {
+        // Populate lead assignee
+        if (project.leadAssignee) {
+          project.leadAssignee = await populateEmployee(project.leadAssignee) || project.leadAssignee;
+        }
+        // Populate VA Incharge
+        if (project.vaIncharge) {
+          project.vaIncharge = await populateEmployee(project.vaIncharge) || project.vaIncharge;
+        }
+        // Populate Update Incharge
+        if (project.updateIncharge) {
+          project.updateIncharge = await populateEmployee(project.updateIncharge) || project.updateIncharge;
+        }
+        return project;
+      })
+    );
+
+    return NextResponse.json({projects: populatedProjects});
   } catch (error) {
     console.error("Error fetching projects:", error);
     return NextResponse.json({error: "Internal server error"}, {status: 500});

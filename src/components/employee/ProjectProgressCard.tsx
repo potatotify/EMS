@@ -1,6 +1,7 @@
 "use client";
 
-import {Calendar, Clock, User, TrendingUp} from "lucide-react";
+import {useSession} from "next-auth/react";
+import {Calendar, Clock, User, TrendingUp, Lock} from "lucide-react";
 
 interface Project {
   _id: string;
@@ -12,6 +13,7 @@ interface Project {
   githubLink?: string;
   loomLink?: string;
   whatsappGroupLink?: string;
+  leadAssignee?: any;
 }
 
 interface ProjectProgressCardProps {
@@ -23,6 +25,16 @@ export default function ProjectProgressCard({
   project,
   onUpdate
 }: ProjectProgressCardProps) {
+  const {data: session} = useSession();
+  
+  // Check if current user is the lead assignee
+  const userId = (session?.user as any)?.id;
+  const isLeadAssignee = project.leadAssignee && (
+    (typeof project.leadAssignee === 'object' && project.leadAssignee._id === userId) ||
+    (typeof project.leadAssignee === 'string' && project.leadAssignee === userId) ||
+    project.leadAssignee === userId
+  );
+
   const getPriorityColor = (priority: string) => {
     switch (priority) {
       case "urgent":
@@ -127,13 +139,20 @@ export default function ProjectProgressCard({
         </div>
       )}
 
-      <button
-        onClick={() => onUpdate(project)}
-        className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium transition-colors"
-      >
-        <TrendingUp className="w-4 h-4" />
-        Submit Daily Project Update
-      </button>
+      {isLeadAssignee ? (
+        <button
+          onClick={() => onUpdate(project)}
+          className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium transition-colors"
+        >
+          <TrendingUp className="w-4 h-4" />
+          Submit Daily Project Update
+        </button>
+      ) : (
+        <div className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 bg-gray-300 text-gray-600 rounded-lg font-medium cursor-not-allowed">
+          <Lock className="w-4 h-4" />
+          Only Lead Assignee Can Submit Updates
+        </div>
+      )}
     </div>
   );
 }

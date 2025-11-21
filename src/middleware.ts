@@ -22,7 +22,7 @@ export async function middleware(req: NextRequest) {
 
   // If user is authenticated
   if (token) {
-    const role = token.role as 'admin' | 'employee' | 'client';
+    const role = token.role as 'admin' | 'employee' | 'client' | 'hackathon';
     
     // Redirect from login/signup to their dashboard
     if (pathname === '/login' || pathname === '/signup') {
@@ -32,6 +32,8 @@ export async function middleware(req: NextRequest) {
         return NextResponse.redirect(new URL('/employee/dashboard', req.url));
       } else if (role === 'client') {
         return NextResponse.redirect(new URL('/client/dashboard', req.url));
+      } else if (role === 'hackathon') {
+        return NextResponse.redirect(new URL('/hackathon/dashboard', req.url));
       }
     }
 
@@ -43,6 +45,8 @@ export async function middleware(req: NextRequest) {
         return NextResponse.redirect(new URL('/employee/dashboard', req.url));
       } else if (role === 'client') {
         return NextResponse.redirect(new URL('/client/dashboard', req.url));
+      } else if (role === 'hackathon') {
+        return NextResponse.redirect(new URL('/hackathon/dashboard', req.url));
       }
     }
 
@@ -57,8 +61,13 @@ export async function middleware(req: NextRequest) {
       pathname.startsWith('/admin') ||
       pathname.startsWith('/employee') ||
       pathname.startsWith('/client') ||
+      pathname.startsWith('/hackathon') ||
       pathname === '/dashboard'
     ) {
+      // Allow hackathon signup/login pages
+      if (pathname.startsWith('/hackathon/signup') || pathname.startsWith('/hackathon/login')) {
+        return NextResponse.next();
+      }
       return NextResponse.redirect(new URL('/login', req.url));
     }
   }

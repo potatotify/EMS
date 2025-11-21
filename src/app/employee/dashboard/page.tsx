@@ -10,7 +10,9 @@ import {
   AlertCircle,
   Mail,
   CheckCircle,
-  ChevronDown
+  UserCheck,
+  Lightbulb,
+  Award
 } from "lucide-react";
 import {motion} from "framer-motion";
 
@@ -23,7 +25,7 @@ import DailyUpdateModal from "@/components/employee/DailyUpdateModal";
 import DailyUpdateForm from "@/components/employee/DailyUpdateForm";
 import AttendanceModal from "@/components/employee/AttendanceForm";
 import EmployeeTasksSection from "@/components/employee/EmployeeTasksSection";
-import CollapsibleSection from "@/components/shared/CollapsibleSection";
+import EmployeeBonusFine from "@/components/employee/EmployeeBonusFine";
 
 interface Project {
   _id: string;
@@ -32,9 +34,19 @@ interface Project {
   deadline: string;
   status: string;
   priority: string;
+  leadAssignee?: any;
   githubLink?: string;
   loomLink?: string;
   whatsappGroupLink?: string;
+}
+
+type SectionType = "projects" | "daily-update" | "tasks" | "bonus-fine" | "tips";
+
+interface SidebarItem {
+  id: SectionType;
+  title: string;
+  icon: React.ReactNode;
+  badge?: number;
 }
 
 export default function EmployeeDashboard() {
@@ -46,6 +58,7 @@ export default function EmployeeDashboard() {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
+  const [activeSection, setActiveSection] = useState<SectionType>("projects");
 
   useEffect(() => {
     if (status === "authenticated") {
@@ -128,20 +141,151 @@ export default function EmployeeDashboard() {
     );
   }
 
+  const sidebarItems: SidebarItem[] = [
+    {
+      id: "projects",
+      title: "My Projects",
+      icon: <FolderKanban className="w-5 h-5" />
+    },
+    {
+      id: "daily-update",
+      title: "Daily Update",
+      icon: <TrendingUp className="w-5 h-5" />
+    },
+    {
+      id: "tasks",
+      title: "My Tasks",
+      icon: <CheckCircle className="w-5 h-5" />
+    },
+    {
+      id: "bonus-fine",
+      title: "Bonus & Fine",
+      icon: <Award className="w-5 h-5" />
+    },
+    {
+      id: "tips",
+      title: "Tips & Guidelines",
+      icon: <Lightbulb className="w-5 h-5" />
+    }
+  ];
+
+  const inProgressProjects = projects.filter((p) => p.status === "in_progress");
+
+  const renderContent = () => {
+    switch (activeSection) {
+      case "projects":
+        return (
+          <div className="space-y-6">
+            {projects.length === 0 ? (
+              <div className="text-center py-16 border-2 border-dashed border-emerald-300/50 rounded-2xl bg-linear-to-br from-emerald-50/50 to-teal-50/50">
+                <FolderKanban className="w-20 h-20 text-emerald-400 mx-auto mb-4" />
+                <p className="text-lg font-semibold text-gray-900 mb-2">
+                  No projects assigned yet
+                </p>
+                <p className="text-gray-600">
+                  Projects assigned to you will appear here
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {projects.map((project) => (
+                  <ProjectProgressCard
+                    key={project._id}
+                    project={project}
+                    onUpdate={setSelectedProject}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      case "daily-update":
+        return <DailyUpdateForm />;
+      case "tasks":
+        return <EmployeeTasksSection />;
+      case "bonus-fine":
+        return <EmployeeBonusFine />;
+      case "tips":
+        return (
+          <div className="space-y-4">
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-6 border border-blue-100">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                <AlertCircle className="w-5 h-5 text-blue-600" />
+                Daily Update Guidelines
+              </h3>
+              <ul className="text-sm text-gray-700 space-y-3">
+                <li className="flex items-start gap-3">
+                  <span className="text-blue-600 font-bold mt-0.5">•</span>
+                  <span>
+                    <strong>Submit on time:</strong> Submit your daily updates before end of day to ensure proper tracking
+                  </span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="text-blue-600 font-bold mt-0.5">•</span>
+                  <span>
+                    <strong>Be specific:</strong> Provide detailed information about tasks completed, including specific features or fixes
+                  </span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="text-blue-600 font-bold mt-0.5">•</span>
+                  <span>
+                    <strong>Report blockers:</strong> Immediately report any challenges or blockers that prevent you from completing tasks
+                  </span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="text-blue-600 font-bold mt-0.5">•</span>
+                  <span>
+                    <strong>Accurate progress:</strong> Update progress percentage accurately based on actual work completed
+                  </span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="text-blue-600 font-bold mt-0.5">•</span>
+                  <span>
+                    <strong>Project updates:</strong> Only lead assignees can submit daily project updates. Other team members can submit general daily updates.
+                  </span>
+                </li>
+              </ul>
+            </div>
+          </div>
+        );
+      default:
+        return null;
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-linear-to-br from-slate-50 via-emerald-50/20 to-teal-50/30 relative overflow-hidden">
-      {/* Animated background */}
-      <div className="fixed inset-0 -z-10 opacity-20">
-        <div className="absolute top-0 left-1/4 w-96 h-96 bg-emerald-200 rounded-full mix-blend-multiply filter blur-3xl animate-float" />
-        <div
-          className="absolute bottom-0 right-1/4 w-96 h-96 bg-teal-200 rounded-full mix-blend-multiply filter blur-3xl animate-float"
-          style={{animationDelay: "2s"}}
-        />
+    <div className="min-h-screen bg-neutral-50 relative">
+      {/* Subtle Background Pattern */}
+      <div className="fixed inset-0 -z-10 opacity-[0.02]">
+        <div className="absolute inset-0" style={{
+          backgroundImage: `radial-gradient(circle at 1px 1px, rgb(0 0 0) 1px, transparent 0)`,
+          backgroundSize: '32px 32px'
+        }} />
       </div>
 
       <Header
         title="Employee Dashboard"
         userName={session?.user?.name || ""}
+        overviewStats={[
+          {
+            label: "Projects",
+            value: projects.length,
+            icon: <FolderKanban className="w-4 h-4" />,
+            color: "from-emerald-500 to-teal-500"
+          },
+          {
+            label: "In Progress",
+            value: inProgressProjects.length,
+            icon: <Clock className="w-4 h-4" />,
+            color: "from-blue-500 to-cyan-500"
+          },
+          {
+            label: "Messages",
+            value: unreadMessages,
+            icon: <Mail className="w-4 h-4" />,
+            color: "from-amber-500 to-orange-500"
+          }
+        ]}
         rightActions={
           <div className="flex items-center gap-2">
             <motion.button
@@ -151,7 +295,7 @@ export default function EmployeeDashboard() {
               onClick={() => setShowAttendanceModal(true)}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-xl glass-effect border border-white/40 text-emerald-700 text-sm font-semibold hover:shadow-lg transition-all"
             >
-              <CheckCircle className="w-4 h-4" />
+              <UserCheck className="w-4 h-4" />
               <span>Mark Attendance</span>
             </motion.button>
             <motion.button
@@ -177,109 +321,79 @@ export default function EmployeeDashboard() {
         }
       />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <StatCard
-            title="Assigned Projects"
-            value={projects.length}
-            icon={FolderKanban}
-            iconBgColor="bg-emerald-100"
-            iconColor="text-emerald-600"
-          />
-          <StatCard
-            title="In Progress"
-            value={projects.filter((p) => p.status === "in_progress").length}
-            icon={Clock}
-            iconBgColor="bg-blue-100"
-            iconColor="text-blue-600"
-          />
-          <StatCard
-            title="Updates This Week"
-            value={0}
-            icon={TrendingUp}
-            iconBgColor="bg-purple-100"
-            iconColor="text-purple-600"
-          />
-          <StatCard
-            title="Messages"
-            value={unreadMessages}
-            icon={Mail}
-            iconBgColor="bg-amber-100"
-            iconColor="text-amber-600"
-          />
-        </div>
-
-        {/* Daily Update Form - Collapsible */}
-        <CollapsibleSection
-          title="Submit Daily Update"
-          icon={<TrendingUp className="w-6 h-6 text-white" />}
-        >
-          <DailyUpdateForm />
-        </CollapsibleSection>
-
-        {/* Tasks Section - Collapsible */}
-        <CollapsibleSection
-          title="My Tasks"
-          icon={<CheckCircle className="w-6 h-6 text-white" />}
-        >
-          <EmployeeTasksSection />
-        </CollapsibleSection>
-
-        {/* Projects Section - Collapsible */}
-        <CollapsibleSection
-          title="My Projects"
-          icon={<FolderKanban className="w-6 h-6 text-white" />}
-        >
-          {projects.length === 0 ? (
-            <div className="text-center py-12">
-              <FolderKanban className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-              <p className="text-lg font-semibold text-gray-900 mb-2">
-                No projects assigned yet
-              </p>
-              <p className="text-gray-600">
-                Projects assigned to you will appear here
-              </p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {projects.map((project) => (
-                <ProjectProgressCard
-                  key={project._id}
-                  project={project}
-                  onUpdate={setSelectedProject}
-                />
+      <div className="flex h-[calc(100vh-5rem)]">
+        {/* Left Sidebar */}
+        <aside className="w-64 lg:w-72 bg-white border-r border-neutral-200 flex flex-col shadow-sm">
+          <nav className="flex-1 overflow-y-auto p-4">
+            <h3 className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-4 px-3">
+              Navigation
+            </h3>
+            <div className="space-y-1">
+              {sidebarItems.map((item) => (
+                <motion.button
+                  key={item.id}
+                  whileHover={{scale: 1.01, x: 4}}
+                  whileTap={{scale: 0.99}}
+                  onClick={() => setActiveSection(item.id)}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all duration-200 relative group ${
+                    activeSection === item.id
+                      ? "bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md shadow-emerald-500/20"
+                      : "text-neutral-700 hover:bg-neutral-100"
+                  }`}
+                >
+                  <div className={`transition-transform ${activeSection === item.id ? "scale-110" : "group-hover:scale-105"}`}>
+                    {item.icon}
+                  </div>
+                  <span className="flex-1 font-medium text-sm">{item.title}</span>
+                  {item.badge && (
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-xs font-bold ${
+                        activeSection === item.id
+                          ? "bg-white/20 text-white"
+                          : "bg-amber-500 text-white"
+                      }`}
+                    >
+                      {item.badge}
+                    </span>
+                  )}
+                </motion.button>
               ))}
             </div>
-          )}
-        </CollapsibleSection>
+          </nav>
+        </aside>
 
-        {/* Quick Tips - Collapsible */}
-        <CollapsibleSection
-          title="Daily Update Tips"
-          icon={<AlertCircle className="w-6 h-6 text-white" />}
-          headerColor="from-blue-600 to-blue-700"
-        >
-          <ul className="text-sm text-gray-700 space-y-2">
-            <li className="flex items-start gap-2">
-              <span className="text-blue-600 font-bold">•</span>
-              <span>Submit your daily updates before end of day</span>
-            </li>
-            <li className="flex items-start gap-2">
-              <span className="text-blue-600 font-bold">•</span>
-              <span>Be specific about tasks completed</span>
-            </li>
-            <li className="flex items-start gap-2">
-              <span className="text-blue-600 font-bold">•</span>
-              <span>Report any blockers immediately</span>
-            </li>
-            <li className="flex items-start gap-2">
-              <span className="text-blue-600 font-bold">•</span>
-              <span>Update progress percentage accurately</span>
-            </li>
-          </ul>
-        </CollapsibleSection>
-      </main>
+        {/* Main Content Area */}
+        <main className="flex-1 overflow-y-auto bg-neutral-50/50">
+          <div className="max-w-[1920px] mx-auto p-6 lg:p-8">
+            {/* Section Header */}
+            <motion.div
+              initial={{opacity: 0, y: -10}}
+              animate={{opacity: 1, y: 0}}
+              className="mb-8"
+            >
+              <div className="flex items-center gap-3 mb-2">
+                <div className="p-2 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-500/20">
+                  {sidebarItems.find((item) => item.id === activeSection)?.icon}
+                </div>
+                <h2 className="text-3xl font-bold text-neutral-900">
+                  {sidebarItems.find((item) => item.id === activeSection)?.title}
+                </h2>
+              </div>
+            </motion.div>
+
+            {/* Content */}
+            <motion.div
+              key={activeSection}
+              initial={{opacity: 0, y: 20}}
+              animate={{opacity: 1, y: 0}}
+              exit={{opacity: 0, y: -20}}
+              transition={{duration: 0.3}}
+            >
+              {renderContent()}
+            </motion.div>
+          </div>
+        </main>
+      </div>
 
       {/* Daily Update Modal */}
       {selectedProject && (

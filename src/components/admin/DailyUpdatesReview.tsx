@@ -2,7 +2,8 @@
 
 import {useState, useEffect} from "react";
 import {useSession} from "next-auth/react";
-import {CheckCircle, XCircle, Clock} from "lucide-react";
+import {motion} from "framer-motion";
+import {CheckCircle, XCircle, CheckSquare, Square, Edit2, Save, X, RefreshCw, Search, Calendar} from "lucide-react";
 
 interface DailyUpdate {
   _id: string;
@@ -18,62 +19,37 @@ interface DailyUpdate {
   adminNotes: string;
   adminApproved: boolean;
 
-  // Daily Updates
-  attendedMorningSession: boolean;
-  cameOnTime: boolean;
+  // Essential Daily Updates
   workedOnProject: boolean;
-  askedForNewProject: boolean;
-  gotCodeCorrected: boolean;
-  updatedClient: boolean;
-  workedOnTrainingTask: boolean;
-  updatedSeniorTeam: boolean;
   updatedDailyProgress: boolean;
-  plannedNextDayTask: boolean;
-  completedAllTasks: boolean;
-  workedOnMultipleProjects: boolean;
-  tasksForTheDay: string;
-
-  // Project Management
-  informedUnableToComplete: boolean;
-  ensuredProjectReassigned: boolean;
-  ensuredProjectOnTime: boolean;
-  informedBeforeBunking: boolean;
-  informedBeforeLate: boolean;
-  informedLeavingMeeting: boolean;
-  freelancerNeeded: boolean;
-  ensuredFreelancerHired: boolean;
-  addedToWhatsAppGroup: boolean;
-  slackGroupCreated: boolean;
-  projectAssignedToSomeoneElse: boolean;
-  supervisor: string;
-  projectInPriority: boolean;
-  followedUpWithClient: boolean;
-  completedAllProjectTasks: boolean;
-  setTaskDeadlines: boolean;
   recordedLoomVideos: boolean;
-  organizedLoomVideos: boolean;
-  metDeadlines: boolean;
-  screenShared: boolean;
-
+  updatedClient: boolean;
+  completedAllTasks: boolean;
+  tasksForTheDay: string;
   hoursWorked: number;
   additionalNotes: string;
 }
+
+// Define only essential checkbox fields
+const checkboxFields = [
+  {key: "workedOnProject", label: "Worked on Project", shortLabel: "Project"},
+  {key: "updatedDailyProgress", label: "Daily Progress", shortLabel: "Progress"},
+  {key: "recordedLoomVideos", label: "Loom Videos", shortLabel: "Loom"},
+  {key: "updatedClient", label: "Updated Client", shortLabel: "Client"},
+  {key: "completedAllTasks", label: "All Tasks Done", shortLabel: "Done"}
+];
 
 export default function DailyUpdatesReview() {
   const {data: session} = useSession();
   const [updates, setUpdates] = useState<DailyUpdate[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedUpdate, setSelectedUpdate] = useState<DailyUpdate | null>(
-    null
-  );
-  const [adminScore, setAdminScore] = useState(0);
-  const [adminNotes, setAdminNotes] = useState("");
-  const [adminApproved, setAdminApproved] = useState(false);
-  const [editableData, setEditableData] = useState<any>(null);
+  const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [filterDate, setFilterDate] = useState(
     new Date().toISOString().split("T")[0]
   );
   const [filterEmployee, setFilterEmployee] = useState("");
+  const [editingUpdate, setEditingUpdate] = useState<string | null>(null);
+  const [editData, setEditData] = useState<Record<string, any>>({});
 
   useEffect(() => {
     fetchUpdates();
@@ -88,16 +64,10 @@ export default function DailyUpdatesReview() {
       if (filterEmployee) params.append("employeeId", filterEmployee);
 
       const url = `/api/daily-updates?${params.toString()}`;
-      console.log("Fetching updates from:", url);
-
       const response = await fetch(url);
       const data = await response.json();
 
-      console.log("Response status:", response.status);
-      console.log("Response data:", data);
-
       if (!response.ok) {
-        console.error("API Error:", data);
         setUpdates([]);
         return;
       }
@@ -111,549 +81,422 @@ export default function DailyUpdatesReview() {
     }
   };
 
-  const calculateAutoScore = (data: any) => {
-    // Count all checked checkboxes
-    const checkboxFields = [
-      "attendedMorningSession",
-      "cameOnTime",
-      "workedOnProject",
-      "askedForNewProject",
-      "gotCodeCorrected",
-      "updatedClient",
-      "workedOnTrainingTask",
-      "updatedSeniorTeam",
-      "updatedDailyProgress",
-      "plannedNextDayTask",
-      "completedAllTasks",
-      "workedOnMultipleProjects",
-      "informedUnableToComplete",
-      "ensuredProjectReassigned",
-      "ensuredProjectOnTime",
-      "informedBeforeBunking",
-      "informedBeforeLate",
-      "informedLeavingMeeting",
-      "freelancerNeeded",
-      "ensuredFreelancerHired",
-      "addedToWhatsAppGroup",
-      "slackGroupCreated",
-      "projectAssignedToSomeoneElse",
-      "projectInPriority",
-      "followedUpWithClient",
-      "completedAllProjectTasks",
-      "setTaskDeadlines",
-      "recordedLoomVideos",
-      "organizedLoomVideos",
-      "metDeadlines",
-      "screenShared"
-    ];
-
-    let checkedCount = 0;
-    checkboxFields.forEach((field) => {
-      if (data[field]) checkedCount++;
+  const toggleRowSelection = (updateId: string) => {
+    setSelectedRows((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(updateId)) {
+        newSet.delete(updateId);
+      } else {
+        newSet.add(updateId);
+      }
+      return newSet;
     });
-
-    // Calculate percentage: (checked / total) * 100
-    const score = Math.round((checkedCount / checkboxFields.length) * 100);
-    return score;
   };
 
-  const handleSelectUpdate = (update: DailyUpdate) => {
-    setSelectedUpdate(update);
-    const autoScore = calculateAutoScore(update);
-    setAdminScore(autoScore);
-    setAdminNotes(update.adminNotes || "");
-    setAdminApproved(update.adminApproved || false);
-    setEditableData({...update});
+  const toggleSelectAll = () => {
+    if (selectedRows.size === updates.length && updates.length > 0) {
+      setSelectedRows(new Set());
+    } else {
+      setSelectedRows(new Set(updates.map((u) => u._id)));
+    }
   };
 
-  const handleCheckboxChange = (field: string, value: boolean) => {
-    setEditableData((prev: any) => ({
+  const handleCheckboxChange = (updateId: string, field: string, value: boolean) => {
+    if (!editData[updateId]) {
+      const update = updates.find((u) => u._id === updateId);
+      if (update) {
+        setEditData((prev) => ({
+          ...prev,
+          [updateId]: {...update}
+        }));
+      }
+    }
+    setEditData((prev) => ({
       ...prev,
-      [field]: value
+      [updateId]: {
+        ...prev[updateId],
+        [field]: value
+      }
     }));
   };
 
-  const handleSaveReview = async () => {
-    if (!selectedUpdate || !editableData) return;
+  const calculateAutoScore = (data: DailyUpdate | any) => {
+    let checkedCount = 0;
+    checkboxFields.forEach((field) => {
+      if (data[field.key]) checkedCount++;
+    });
+    // Score based on essential fields (5 fields = 100%)
+    return Math.round((checkedCount / checkboxFields.length) * 100);
+  };
+
+  const handleSaveUpdate = async (updateId: string) => {
+    const update = editData[updateId];
+    if (!update) return;
 
     try {
-      const response = await fetch(`/api/daily-updates/${selectedUpdate._id}`, {
+      const autoScore = calculateAutoScore(update);
+      const response = await fetch(`/api/daily-updates/${updateId}`, {
         method: "PUT",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({
           status: "reviewed",
-          adminScore,
-          adminNotes,
-          adminApproved,
-          // Include all editable checkbox fields
-          attendedMorningSession: editableData.attendedMorningSession,
-          cameOnTime: editableData.cameOnTime,
-          workedOnProject: editableData.workedOnProject,
-          askedForNewProject: editableData.askedForNewProject,
-          gotCodeCorrected: editableData.gotCodeCorrected,
-          updatedClient: editableData.updatedClient,
-          workedOnTrainingTask: editableData.workedOnTrainingTask,
-          updatedSeniorTeam: editableData.updatedSeniorTeam,
-          updatedDailyProgress: editableData.updatedDailyProgress,
-          plannedNextDayTask: editableData.plannedNextDayTask,
-          completedAllTasks: editableData.completedAllTasks,
-          workedOnMultipleProjects: editableData.workedOnMultipleProjects,
-          informedUnableToComplete: editableData.informedUnableToComplete,
-          ensuredProjectReassigned: editableData.ensuredProjectReassigned,
-          ensuredProjectOnTime: editableData.ensuredProjectOnTime,
-          informedBeforeBunking: editableData.informedBeforeBunking,
-          informedBeforeLate: editableData.informedBeforeLate,
-          informedLeavingMeeting: editableData.informedLeavingMeeting,
-          freelancerNeeded: editableData.freelancerNeeded,
-          ensuredFreelancerHired: editableData.ensuredFreelancerHired,
-          addedToWhatsAppGroup: editableData.addedToWhatsAppGroup,
-          slackGroupCreated: editableData.slackGroupCreated,
-          projectAssignedToSomeoneElse:
-            editableData.projectAssignedToSomeoneElse,
-          projectInPriority: editableData.projectInPriority,
-          followedUpWithClient: editableData.followedUpWithClient,
-          completedAllProjectTasks: editableData.completedAllProjectTasks,
-          setTaskDeadlines: editableData.setTaskDeadlines,
-          recordedLoomVideos: editableData.recordedLoomVideos,
-          organizedLoomVideos: editableData.organizedLoomVideos,
-          metDeadlines: editableData.metDeadlines,
-          screenShared: editableData.screenShared
+          adminScore: autoScore,
+          adminNotes: update.adminNotes || "",
+          adminApproved: update.adminApproved || false,
+          ...Object.fromEntries(
+            checkboxFields.map((f) => [f.key, update[f.key] || false])
+          ),
+          tasksForTheDay: update.tasksForTheDay || "",
+          hoursWorked: update.hoursWorked || 0,
+          additionalNotes: update.additionalNotes || ""
         })
       });
 
       if (response.ok) {
-        alert("Review saved successfully!");
-        setSelectedUpdate(null);
-        setEditableData(null);
+        setEditingUpdate(null);
+        setEditData((prev) => {
+          const newData = {...prev};
+          delete newData[updateId];
+          return newData;
+        });
         fetchUpdates();
+        alert("Update saved successfully!");
       } else {
-        alert("Failed to save review");
+        alert("Failed to save update");
       }
     } catch (error) {
-      console.error("Error saving review:", error);
-      alert("Error saving review");
+      console.error("Error saving update:", error);
+      alert("Error saving update");
     }
   };
 
-  const calculateScore = (update: DailyUpdate): number => {
-    let score = 0;
-    const fields = [
-      "attendedMorningSession",
-      "cameOnTime",
-      "workedOnProject",
-      "askedForNewProject",
-      "gotCodeCorrected",
-      "updatedClient",
-      "workedOnTrainingTask",
-      "updatedSeniorTeam",
-      "updatedDailyProgress",
-      "plannedNextDayTask",
-      "completedAllTasks",
-      "workedOnMultipleProjects"
-    ];
-
-    fields.forEach((field) => {
-      if (update[field as keyof DailyUpdate]) score += 1;
-    });
-
-    return score;
+  const getStatusBadge = (status: string) => {
+    const colors = {
+      approved: "bg-green-100 text-green-800 border-green-200",
+      reviewed: "bg-blue-100 text-blue-800 border-blue-200",
+      submitted: "bg-yellow-100 text-yellow-800 border-yellow-200",
+      pending: "bg-gray-100 text-gray-800 border-gray-200"
+    };
+    return (
+      <span
+        className={`px-2.5 py-1 rounded-md text-xs font-medium border ${
+          colors[status as keyof typeof colors] || colors.pending
+        }`}
+      >
+        {status.charAt(0).toUpperCase() + status.slice(1)}
+      </span>
+    );
   };
 
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="text-gray-500">Loading updates...</div>
+      </div>
+    );
+  }
+
   return (
-    <>
-      {/* Filters */}
-      <div className="bg-white/90 p-6 border-b border-gray-200 rounded-t-xl">
+    <div className="space-y-6">
+      {/* Header and Filters */}
+      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 lg:p-8">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+          <div>
+            <h2 className="text-2xl font-bold text-neutral-900">Daily Updates Review</h2>
+            <p className="text-sm text-neutral-600 mt-1.5">
+              Review and manage employee daily updates
+            </p>
+          </div>
+          <div className="flex items-center gap-3 px-4 py-2 bg-neutral-50 rounded-xl border border-neutral-200">
+            <span className="text-sm font-medium text-neutral-700">
+              {updates.length} update{updates.length !== 1 ? 's' : ''} found
+            </span>
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="block text-sm font-semibold text-neutral-700 mb-2 flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-neutral-500" />
               Date
             </label>
             <input
               type="date"
               value={filterDate}
               onChange={(e) => setFilterDate(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-emerald-500 focus:border-emerald-500"
+              className="w-full px-4 py-2.5 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all bg-white shadow-sm hover:shadow-md"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Employee ID (Optional)
+            <label className="block text-sm font-semibold text-neutral-700 mb-2 flex items-center gap-2">
+              <Search className="w-4 h-4 text-neutral-500" />
+              Employee (Optional)
             </label>
             <input
               type="text"
               value={filterEmployee}
               onChange={(e) => setFilterEmployee(e.target.value)}
-              placeholder="Filter by employee ID"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-emerald-500 focus:border-emerald-500"
+              placeholder="Filter by employee ID or name"
+              className="w-full px-4 py-2.5 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all bg-white shadow-sm hover:shadow-md placeholder-neutral-400"
             />
           </div>
           <div className="flex items-end">
-            <button
+            <motion.button
+              whileHover={{scale: 1.02}}
+              whileTap={{scale: 0.98}}
               onClick={fetchUpdates}
-              className="w-full px-4 py-2 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 transition-colors font-medium"
+              className="w-full px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 text-white rounded-xl hover:from-emerald-600 hover:to-teal-700 transition-all font-semibold flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/25 hover:shadow-xl hover:shadow-emerald-500/30"
             >
-              Refresh Updates
-            </button>
+              <RefreshCw className="w-4 h-4" />
+              Refresh
+            </motion.button>
           </div>
         </div>
       </div>
 
-      <div className="p-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Updates List */}
-        <div className="lg:col-span-1">
-          <div className="bg-white rounded-lg shadow h-[600px] flex flex-col">
-            <div className="px-6 py-4 border-b border-gray-200">
-              <h3 className="text-lg font-medium text-gray-900">
-                Updates ({updates.length})
-              </h3>
-            </div>
-            <div className="divide-y divide-gray-200 overflow-y-auto flex-1">
-              {loading ? (
-                <div className="px-6 py-4 text-center text-gray-500">
-                  Loading...
-                </div>
-              ) : updates.length === 0 ? (
-                <div className="px-6 py-4 text-center text-gray-500">
-                  No updates found
-                </div>
-              ) : (
-                updates.map((update) => (
-                  <button
-                    key={update._id}
-                    onClick={() => handleSelectUpdate(update)}
-                    className={`w-full text-left px-6 py-4 hover:bg-gray-50 transition-colors ${
-                      selectedUpdate?._id === update._id ? "bg-emerald-50" : ""
-                    }`}
-                  >
-                    <div className="font-medium text-gray-900">
-                      {update.employeeId.name}
-                    </div>
-                    <div className="text-sm text-gray-500">
-                      {new Date(update.date).toLocaleDateString()}
-                    </div>
-                    <div className="text-xs mt-1">
-                      <span
-                        className={`inline-block px-2 py-1 rounded ${
-                          update.status === "approved"
-                            ? "bg-green-100 text-green-800"
-                            : update.status === "reviewed"
-                            ? "bg-blue-100 text-blue-800"
-                            : "bg-yellow-100 text-yellow-800"
-                        }`}
-                      >
-                        {update.status}
-                      </span>
-                    </div>
-                  </button>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Review Panel */}
-        <div className="lg:col-span-2">
-          {selectedUpdate ? (
-            <div className="bg-white rounded-lg shadow h-[600px] flex flex-col">
-              <div className="px-6 py-4 border-b border-gray-200">
-                <h3 className="text-lg font-medium text-gray-900">
-                  Review: {selectedUpdate.employeeId.name}
-                </h3>
-                <p className="text-sm text-gray-500 mt-1">
-                  {new Date(selectedUpdate.date).toLocaleDateString()}
-                </p>
-              </div>
-
-              <div className="px-6 py-4 space-y-6 overflow-y-auto flex-1">
-                {/* Daily Updates Summary */}
-                <div className="border-b pb-4">
-                  <h4 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
-                    <CheckCircle className="w-5 h-5 text-emerald-600" />
-                    Daily Updates
-                  </h4>
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    {[
-                      {
-                        key: "attendedMorningSession",
-                        label: "Attended morning session"
-                      },
-                      {key: "cameOnTime", label: "Came on time"},
-                      {key: "workedOnProject", label: "Worked on project"},
-                      {
-                        key: "askedForNewProject",
-                        label: "Asked for new project"
-                      },
-                      {key: "gotCodeCorrected", label: "Got code corrected"},
-                      {key: "updatedClient", label: "Updated client"},
-                      {
-                        key: "workedOnTrainingTask",
-                        label: "Worked on training"
-                      },
-                      {key: "updatedSeniorTeam", label: "Updated senior team"},
-                      {
-                        key: "updatedDailyProgress",
-                        label: "Updated daily progress"
-                      },
-                      {key: "plannedNextDayTask", label: "Planned next day"},
-                      {key: "completedAllTasks", label: "Completed all tasks"},
-                      {
-                        key: "workedOnMultipleProjects",
-                        label: "Multiple projects"
-                      }
-                    ].map(({key, label}) => (
-                      <div
-                        key={key}
-                        className="flex items-center p-2 rounded bg-gray-50 hover:bg-gray-100 cursor-pointer"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={editableData?.[key] || false}
-                          onChange={(e) =>
-                            handleCheckboxChange(key, e.target.checked)
-                          }
-                          className="w-4 h-4 text-green-600 rounded focus:ring-2 focus:ring-green-500 mr-2"
-                        />
-                        <span
-                          className={
-                            editableData?.[key]
-                              ? "text-gray-900 font-medium"
-                              : "text-gray-600"
-                          }
-                        >
-                          {label}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Tasks for the Day */}
-                {selectedUpdate.tasksForTheDay && (
-                  <div className="border-b pb-4">
-                    <h4 className="font-medium text-gray-900 mb-2">
-                      Tasks for the Day
-                    </h4>
-                    <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded">
-                      {selectedUpdate.tasksForTheDay}
-                    </p>
-                  </div>
-                )}
-
-                {/* Project Management */}
-                <div className="border-b pb-4">
-                  <h4 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
-                    <CheckCircle className="w-5 h-5 text-blue-600" />
-                    Project Management
-                  </h4>
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    {[
-                      {
-                        key: "informedUnableToComplete",
-                        label: "Informed unable to complete"
-                      },
-                      {
-                        key: "ensuredProjectReassigned",
-                        label: "Project reassigned"
-                      },
-                      {key: "ensuredProjectOnTime", label: "Project on time"},
-                      {
-                        key: "informedBeforeBunking",
-                        label: "Informed before bunking"
-                      },
-                      {
-                        key: "informedBeforeLate",
-                        label: "Informed before late"
-                      },
-                      {
-                        key: "informedLeavingMeeting",
-                        label: "Informed leaving meeting"
-                      },
-                      {key: "freelancerNeeded", label: "Freelancer needed"},
-                      {
-                        key: "ensuredFreelancerHired",
-                        label: "Freelancer hired"
-                      },
-                      {
-                        key: "addedToWhatsAppGroup",
-                        label: "Added to WhatsApp group"
-                      },
-                      {key: "slackGroupCreated", label: "Slack group created"},
-                      {
-                        key: "projectAssignedToSomeoneElse",
-                        label: "Assigned to someone else"
-                      },
-                      {key: "projectInPriority", label: "Project in priority"},
-                      {
-                        key: "followedUpWithClient",
-                        label: "Followed up with client"
-                      },
-                      {
-                        key: "completedAllProjectTasks",
-                        label: "All project tasks done"
-                      },
-                      {key: "setTaskDeadlines", label: "Set task deadlines"},
-                      {
-                        key: "recordedLoomVideos",
-                        label: "Recorded Loom videos"
-                      },
-                      {
-                        key: "organizedLoomVideos",
-                        label: "Organized Loom videos"
-                      },
-                      {key: "metDeadlines", label: "Met deadlines"},
-                      {key: "screenShared", label: "Screensharing at all times"}
-                    ].map(({key, label}) => (
-                      <div
-                        key={key}
-                        className="flex items-center p-2 rounded bg-gray-50 hover:bg-gray-100 cursor-pointer"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={editableData?.[key] || false}
-                          onChange={(e) =>
-                            handleCheckboxChange(key, e.target.checked)
-                          }
-                          className="w-4 h-4 text-green-600 rounded focus:ring-2 focus:ring-green-500 mr-2"
-                        />
-                        <span
-                          className={
-                            editableData?.[key]
-                              ? "text-gray-900 font-medium"
-                              : "text-gray-600"
-                          }
-                        >
-                          {label}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Supervisor */}
-                {selectedUpdate.supervisor && (
-                  <div className="border-b pb-4">
-                    <h4 className="font-medium text-gray-900 mb-2">
-                      Supervisor
-                    </h4>
-                    <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded">
-                      {selectedUpdate.supervisor}
-                    </p>
-                  </div>
-                )}
-
-                {/* Hours Worked */}
-                <div className="border-b pb-4">
-                  <h4 className="font-medium text-gray-900 mb-2">
-                    Hours Worked
-                  </h4>
+      {/* Table */}
+      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-gradient-to-r from-emerald-500 to-teal-600 text-white">
+              <tr>
+                <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider">
                   <div className="flex items-center gap-2">
-                    <Clock className="w-5 h-5 text-purple-600" />
-                    <span className="text-lg font-semibold text-gray-900">
-                      {selectedUpdate.hoursWorked} hours
-                    </span>
-                  </div>
-                </div>
-
-                {/* Additional Notes */}
-                {selectedUpdate.additionalNotes && (
-                  <div className="border-b pb-4">
-                    <h4 className="font-medium text-gray-900 mb-2">
-                      Additional Notes
-                    </h4>
-                    <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded">
-                      {selectedUpdate.additionalNotes}
-                    </p>
-                  </div>
-                )}
-
-                {/* Admin Review */}
-                <div className="border-t border-gray-200 pt-4">
-                  <h4 className="font-medium text-gray-900 mb-3">
-                    Admin Review
-                  </h4>
-
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Score (0-100)
-                    </label>
-                    <div className="flex gap-2 items-end">
-                      <div className="flex-1">
-                        <input
-                          type="number"
-                          min="0"
-                          max="100"
-                          value={adminScore}
-                          onChange={(e) =>
-                            setAdminScore(Number(e.target.value))
-                          }
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-emerald-500 focus:border-emerald-500"
-                        />
-                      </div>
-                      <button
-                        onClick={() => {
-                          const autoScore = calculateAutoScore(editableData);
-                          setAdminScore(autoScore);
-                        }}
-                        className="px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm font-medium"
-                      >
-                        Auto Calculate
-                      </button>
-                    </div>
-                    <p className="text-xs text-gray-500 mt-1">
-                      Auto-calculated based on checkbox completion
-                    </p>
-                  </div>
-
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Notes
-                    </label>
-                    <textarea
-                      rows={3}
-                      value={adminNotes}
-                      onChange={(e) => setAdminNotes(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-emerald-500 focus:border-emerald-500"
-                    />
-                  </div>
-
-                  <div className="mb-4 flex items-center">
-                    <input
-                      type="checkbox"
-                      id="approved"
-                      checked={adminApproved}
-                      onChange={(e) => setAdminApproved(e.target.checked)}
-                      className="h-4 w-4 text-emerald-600 focus:ring-emerald-500 border-gray-300 rounded"
-                    />
-                    <label
-                      htmlFor="approved"
-                      className="ml-2 block text-sm text-gray-700"
+                    <button
+                      onClick={toggleSelectAll}
+                      className="hover:opacity-80 transition-opacity p-1 rounded-lg hover:bg-white/10"
+                      title="Select All"
                     >
-                      Approve this update
-                    </label>
+                      {selectedRows.size === updates.length && updates.length > 0 ? (
+                        <CheckSquare className="w-5 h-5" />
+                      ) : (
+                        <Square className="w-5 h-5" />
+                      )}
+                    </button>
+                    <span>Select</span>
                   </div>
-
-                  <button
-                    onClick={adminApproved ? handleSaveReview : () => {}}
-                    disabled={!adminApproved}
-                    className={`w-full px-4 py-2 rounded-md transition-colors
-                    ${
-                      adminApproved
-                        ? "bg-emerald-600 text-white hover:bg-emerald-700 cursor-pointer"
-                        : "bg-gray-400 text-gray-200 cursor-not-allowed"
-                    }`}
+                </th>
+                <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider">
+                  Employee
+                </th>
+                <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider">
+                  Date
+                </th>
+                <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider">
+                  Status
+                </th>
+                <th className="px-6 py-4 text-center text-xs font-semibold uppercase tracking-wider">
+                  Hours
+                </th>
+                <th className="px-6 py-4 text-center text-xs font-semibold uppercase tracking-wider">
+                  Score
+                </th>
+                {checkboxFields.map((field) => (
+                  <th
+                    key={field.key}
+                    className="px-4 py-4 text-center text-xs font-semibold uppercase tracking-wider"
+                    title={field.label}
                   >
-                    Save Review
-                  </button>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="bg-white rounded-lg shadow h-[600px] flex items-center justify-center text-gray-500">
-              Select an update to review
-            </div>
-          )}
+                    <div className="flex flex-col items-center">
+                      <span className="hidden md:inline">{field.label}</span>
+                      <span className="md:hidden">{field.shortLabel}</span>
+                    </div>
+                  </th>
+                ))}
+                <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider min-w-[200px]">
+                  Tasks
+                </th>
+                <th className="px-6 py-4 text-center text-xs font-semibold uppercase tracking-wider">
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-neutral-100">
+              {updates.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={checkboxFields.length + 8}
+                    className="px-6 py-16 text-center"
+                  >
+                    <div className="flex flex-col items-center gap-3">
+                      <div className="w-16 h-16 rounded-full bg-neutral-100 flex items-center justify-center">
+                        <Search className="w-8 h-8 text-neutral-400" />
+                      </div>
+                      <p className="text-lg font-semibold text-neutral-900">No updates found</p>
+                      <p className="text-sm text-neutral-500">
+                        Try adjusting your filters or check back later
+                      </p>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                updates.map((update) => {
+                  const isEditing = editingUpdate === update._id;
+                  const currentData = isEditing
+                    ? editData[update._id] || update
+                    : update;
+                  const isSelected = selectedRows.has(update._id);
+
+                  return (
+                    <tr
+                      key={update._id}
+                      className={`transition-colors ${
+                        isSelected 
+                          ? "bg-emerald-50/50 hover:bg-emerald-100/50" 
+                          : "hover:bg-neutral-50/50"
+                      } ${isEditing ? "bg-blue-50/50" : ""}`}
+                    >
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <button
+                          onClick={() => toggleRowSelection(update._id)}
+                          className="hover:opacity-80 transition-opacity p-1.5 rounded-lg hover:bg-neutral-200"
+                          title={isSelected ? "Deselect" : "Select"}
+                        >
+                          {isSelected ? (
+                            <CheckSquare className="w-5 h-5 text-emerald-600" />
+                          ) : (
+                            <Square className="w-5 h-5 text-neutral-400" />
+                          )}
+                        </button>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div>
+                          <div className="font-semibold text-neutral-900">
+                            {update.employeeId.name}
+                          </div>
+                          <div className="text-xs text-neutral-500 mt-0.5">
+                            {update.employeeId.email}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className="text-sm font-medium text-neutral-700">
+                          {new Date(update.date).toLocaleDateString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric'
+                          })}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        {getStatusBadge(update.status)}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-center">
+                        <span className="text-sm font-semibold text-neutral-900">
+                          {update.hoursWorked || 0}h
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-center">
+                        <span className={`inline-flex items-center justify-center px-2.5 py-1 rounded-lg text-sm font-bold ${
+                          (update.adminScore || update.score || 0) >= 80 
+                            ? 'bg-green-100 text-green-700' 
+                            : (update.adminScore || update.score || 0) >= 60 
+                            ? 'bg-yellow-100 text-yellow-700' 
+                            : 'bg-red-100 text-red-700'
+                        }`}>
+                          {update.adminScore || update.score || 0}%
+                        </span>
+                      </td>
+                      {checkboxFields.map((field) => (
+                        <td key={field.key} className="px-4 py-4 whitespace-nowrap text-center">
+                          {isEditing ? (
+                            <input
+                              type="checkbox"
+                              checked={currentData[field.key] || false}
+                              onChange={(e) =>
+                                handleCheckboxChange(
+                                  update._id,
+                                  field.key,
+                                  e.target.checked
+                                )
+                              }
+                              className="w-5 h-5 text-emerald-600 rounded-lg focus:ring-2 focus:ring-emerald-500 cursor-pointer"
+                            />
+                          ) : (
+                            <div className="flex justify-center">
+                              {currentData[field.key] ? (
+                                <CheckCircle className="w-6 h-6 text-green-600" />
+                              ) : (
+                                <XCircle className="w-6 h-6 text-neutral-300" />
+                              )}
+                            </div>
+                          )}
+                        </td>
+                      ))}
+                      <td className="px-6 py-4 max-w-xs">
+                        <div className="truncate text-sm text-neutral-700" title={update.tasksForTheDay || ""}>
+                          {update.tasksForTheDay || (
+                            <span className="text-neutral-400 italic">No tasks listed</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-center">
+                        {isEditing ? (
+                          <div className="flex gap-2 justify-center">
+                            <motion.button
+                              whileHover={{scale: 1.1}}
+                              whileTap={{scale: 0.9}}
+                              onClick={() => handleSaveUpdate(update._id)}
+                              className="p-2 bg-gradient-to-r from-emerald-500 to-teal-600 text-white rounded-lg hover:from-emerald-600 hover:to-teal-700 transition-all shadow-md hover:shadow-lg"
+                              title="Save changes"
+                            >
+                              <Save className="w-4 h-4" />
+                            </motion.button>
+                            <motion.button
+                              whileHover={{scale: 1.1}}
+                              whileTap={{scale: 0.9}}
+                              onClick={() => {
+                                setEditingUpdate(null);
+                                setEditData((prev) => {
+                                  const newData = {...prev};
+                                  delete newData[update._id];
+                                  return newData;
+                                });
+                              }}
+                              className="p-2 bg-neutral-400 text-white rounded-lg hover:bg-neutral-500 transition-all shadow-md hover:shadow-lg"
+                              title="Cancel editing"
+                            >
+                              <X className="w-4 h-4" />
+                            </motion.button>
+                          </div>
+                        ) : (
+                          <motion.button
+                            whileHover={{scale: 1.1}}
+                            whileTap={{scale: 0.9}}
+                            onClick={() => setEditingUpdate(update._id)}
+                            className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all shadow-md hover:shadow-lg"
+                            title="Edit update"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </motion.button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
-    </>
+
+      {selectedRows.size > 0 && (
+        <motion.div
+          initial={{opacity: 0, y: 10}}
+          animate={{opacity: 1, y: 0}}
+          className="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-xl p-4 flex items-center justify-between shadow-sm"
+        >
+          <p className="text-sm text-emerald-900 font-semibold">
+            {selectedRows.size} row{selectedRows.size !== 1 ? 's' : ''} selected
+          </p>
+          <button
+            onClick={() => setSelectedRows(new Set())}
+            className="text-sm text-emerald-700 hover:text-emerald-900 font-medium underline transition-colors"
+          >
+            Clear selection
+          </button>
+        </motion.div>
+      )}
+    </div>
   );
 }

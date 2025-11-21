@@ -17,6 +17,29 @@ export async function POST(request: NextRequest) {
     const client = await clientPromise;
     const db = client.db('worknest');
 
+    // Check if the project exists and verify user is the lead assignee
+    const project = await db.collection('projects').findOne({
+      _id: new ObjectId(data.projectId)
+    });
+
+    if (!project) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+    }
+
+    // Verify user is the lead assignee
+    const userId = new ObjectId(session.user.id);
+    const leadAssigneeId = project.leadAssignee 
+      ? (typeof project.leadAssignee === 'string' 
+          ? new ObjectId(project.leadAssignee) 
+          : new ObjectId(project.leadAssignee))
+      : null;
+
+    if (!leadAssigneeId || !leadAssigneeId.equals(userId)) {
+      return NextResponse.json({ 
+        error: 'Only the lead assignee can submit daily project updates' 
+      }, { status: 403 });
+    }
+
     // Create daily update
     const update = {
       projectId: new ObjectId(data.projectId),

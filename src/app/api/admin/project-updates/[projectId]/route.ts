@@ -27,7 +27,26 @@ export async function GET(
       .sort({ date: -1 })
       .toArray();
 
-    return NextResponse.json({ updates });
+    // Populate employee information
+    const populatedUpdates = await Promise.all(
+      updates.map(async (update) => {
+        if (update.employeeId) {
+          const employee = await db.collection('users').findOne({
+            _id: new ObjectId(update.employeeId)
+          });
+          if (employee) {
+            update.employeeId = {
+              _id: employee._id.toString(),
+              name: employee.name,
+              email: employee.email
+            };
+          }
+        }
+        return update;
+      })
+    );
+
+    return NextResponse.json({ updates: populatedUpdates });
   } catch (error) {
     console.error('Error fetching project updates:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

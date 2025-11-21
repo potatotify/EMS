@@ -7,15 +7,17 @@ import {
   User,
   TrendingUp,
   Edit2,
-  Save,
   ExternalLink,
   Video,
   Trash2,
   Send,
   MessageSquare,
-  Clock
+  Clock,
+  Settings
 } from "lucide-react";
 import UpdateHistoryCard from "@/components/employee/UpdateHistoryCard";
+import ProjectAssignmentModal from "./ProjectAssignmentModal";
+import UpdateProjectModal from "./UpdateProjectModal";
 
 interface Project {
   _id: string;
@@ -32,9 +34,9 @@ interface Project {
     name: string;
     email: string;
   };
-  vaIncharge?: string;
+  vaIncharge?: string | { name: string; email?: string };
   freelancer?: string;
-  updateIncharge?: string;
+  updateIncharge?: string | { name: string; email?: string };
   codersRecommendation?: string;
   leadership?: string;
   githubLink?: string;
@@ -86,13 +88,6 @@ export default function ProjectDetailsModal({
   const [project, setProject] = useState<Project | null>(null);
   const [updates, setUpdates] = useState<DailyUpdate[]>([]);
   const [loading, setLoading] = useState(true);
-  const [editMode, setEditMode] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [editData, setEditData] = useState({
-    status: "",
-    priority: "",
-    clientProgress: 0
-  });
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [sending, setSending] = useState(false);
@@ -105,6 +100,8 @@ export default function ProjectDetailsModal({
     meetingLink: ""
   });
   const [schedulingMeeting, setSchedulingMeeting] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showUpdateModal, setShowUpdateModal] = useState(false);
   const fetchMessages = async () => {
     try {
       const response = await fetch(`/api/projects/${projectId}/messages`);
@@ -223,11 +220,6 @@ export default function ProjectDetailsModal({
       const data = await response.json();
       if (response.ok) {
         setProject(data.project);
-        setEditData({
-          status: data.project.status,
-          priority: data.project.priority,
-          clientProgress: data.project.clientProgress || 0
-        });
       }
     } catch (error) {
       console.error("Error fetching project:", error);
@@ -248,33 +240,16 @@ export default function ProjectDetailsModal({
     }
   };
 
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      const response = await fetch("/api/admin/update-project", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-          projectId: project?._id,
-          ...editData
-        })
-      });
+  const handleEditSuccess = async () => {
+    await fetchProjectDetails();
+    onUpdate();
+    setShowEditModal(false);
+  };
 
-      if (response.ok) {
-        await fetchProjectDetails();
-        setEditMode(false);
-        onUpdate();
-        alert("Project updated successfully!");
-      } else {
-        const data = await response.json();
-        alert("Error: " + data.error);
-      }
-    } catch (error) {
-      console.error("Error updating project:", error);
-      alert("Failed to update project");
-    } finally {
-      setSaving(false);
-    }
+  const handleUpdateSuccess = async () => {
+    await fetchProjectDetails();
+    onUpdate();
+    setShowUpdateModal(false);
   };
 
   if (loading) {
@@ -320,24 +295,20 @@ export default function ProjectDetailsModal({
             </p>
           </div>
           <div className="flex items-center gap-3">
-            {!editMode ? (
-              <button
-                onClick={() => setEditMode(true)}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg font-medium transition-colors"
-              >
-                <Edit2 className="w-4 h-4" />
-                Edit Project
-              </button>
-            ) : (
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-white text-emerald-700 hover:bg-emerald-50 rounded-lg font-medium transition-colors disabled:opacity-50"
-              >
-                <Save className="w-4 h-4" />
-                {saving ? "Saving..." : "Save Changes"}
-              </button>
-            )}
+            <button
+              onClick={() => setShowUpdateModal(true)}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg font-medium transition-colors"
+            >
+              <Settings className="w-4 h-4" />
+              Update
+            </button>
+            <button
+              onClick={() => setShowEditModal(true)}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg font-medium transition-colors"
+            >
+              <Edit2 className="w-4 h-4" />
+              Edit
+            </button>
             <button
               onClick={onClose}
               className="p-2 hover:bg-white/20 rounded-lg transition-colors"
@@ -391,30 +362,13 @@ export default function ProjectDetailsModal({
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Status
                 </label>
-                {editMode ? (
-                  <select
-                    value={editData.status}
-                    onChange={(e) =>
-                      setEditData({...editData, status: e.target.value})
-                    }
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500"
-                  >
-                    <option value="pending_assignment">
-                      Pending Assignment
-                    </option>
-                    <option value="in_progress">In Progress</option>
-                    <option value="on_hold">On Hold</option>
-                    <option value="completed">Completed</option>
-                  </select>
-                ) : (
-                  <span
-                    className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(
-                      project.status
-                    )}`}
-                  >
-                    {project.status.replace("_", " ").toUpperCase()}
-                  </span>
-                )}
+                <span
+                  className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(
+                    project.status
+                  )}`}
+                >
+                  {project.status.replace("_", " ").toUpperCase()}
+                </span>
               </div>
 
               {/* Priority */}
@@ -422,57 +376,26 @@ export default function ProjectDetailsModal({
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Priority
                 </label>
-                {editMode ? (
-                  <select
-                    value={editData.priority}
-                    onChange={(e) =>
-                      setEditData({...editData, priority: e.target.value})
-                    }
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500"
-                  >
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                    <option value="urgent">Urgent</option>
-                  </select>
-                ) : (
-                  <span className="text-gray-900 font-medium capitalize">
-                    {project.priority}
-                  </span>
-                )}
+                <span className="text-gray-900 font-medium capitalize">
+                  {project.priority}
+                </span>
               </div>
 
               {/* Client Progress */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Client Visible Progress: {editData.clientProgress}%
+                  Client Visible Progress: {project.clientProgress || 0}%
                 </label>
-                {editMode ? (
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    value={editData.clientProgress}
-                    onChange={(e) =>
-                      setEditData({
-                        ...editData,
-                        clientProgress: parseInt(e.target.value)
-                      })
-                    }
-                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-emerald-600"
-                  />
-                ) : (
-                  <div className="w-full bg-gray-200 rounded-full h-4">
-                    <div
-                      className="bg-emerald-600 h-4 rounded-full transition-all flex items-center justify-end pr-2"
-                      style={{width: `${project.clientProgress || 0}%`}}
-                    >
-                      <span className="text-xs text-white font-semibold">
-                        {project.clientProgress || 0}%
-                      </span>
-                    </div>
+                <div className="w-full bg-gray-200 rounded-full h-4">
+                  <div
+                    className="bg-emerald-600 h-4 rounded-full transition-all flex items-center justify-end pr-2"
+                    style={{width: `${project.clientProgress || 0}%`}}
+                  >
+                    <span className="text-xs text-white font-semibold">
+                      {project.clientProgress || 0}%
+                    </span>
                   </div>
-                )}
+                </div>
               </div>
             </div>
           </div>
@@ -498,13 +421,23 @@ export default function ProjectDetailsModal({
               {project.vaIncharge && (
                 <div>
                   <p className="text-gray-600 font-medium">VA Incharge</p>
-                  <p className="text-gray-900">{project.vaIncharge}</p>
+                  <p className="text-gray-900">
+                    {typeof project.vaIncharge === 'object' ? project.vaIncharge.name : project.vaIncharge}
+                  </p>
+                  {typeof project.vaIncharge === 'object' && project.vaIncharge.email && (
+                    <p className="text-gray-500 text-xs">{project.vaIncharge.email}</p>
+                  )}
                 </div>
               )}
               {project.updateIncharge && (
                 <div>
                   <p className="text-gray-600 font-medium">Update Incharge</p>
-                  <p className="text-gray-900">{project.updateIncharge}</p>
+                  <p className="text-gray-900">
+                    {typeof project.updateIncharge === 'object' ? project.updateIncharge.name : project.updateIncharge}
+                  </p>
+                  {typeof project.updateIncharge === 'object' && project.updateIncharge.email && (
+                    <p className="text-gray-500 text-xs">{project.updateIncharge.email}</p>
+                  )}
                 </div>
               )}
               {project.freelancer && (
@@ -837,6 +770,25 @@ export default function ProjectDetailsModal({
           </div>
         </div>
       </div>
+
+      {/* Edit Project Modal */}
+      {showEditModal && project && (
+        <ProjectAssignmentModal
+          project={project}
+          onClose={() => setShowEditModal(false)}
+          onSuccess={handleEditSuccess}
+          isEdit={true}
+        />
+      )}
+
+      {/* Update Project Modal */}
+      {showUpdateModal && project && (
+        <UpdateProjectModal
+          project={project}
+          onClose={() => setShowUpdateModal(false)}
+          onSuccess={handleUpdateSuccess}
+        />
+      )}
     </div>
   );
 }
