@@ -5,7 +5,7 @@ import {Adapter} from "next-auth/adapters";
 import clientPromise from "@/lib/mongodb";
 import {cookies} from "next/headers";
 
-const ADMIN_EMAILS = ["chiragkhati04@gmail.com", "zprootech@gmail.com"];
+const ADMIN_EMAILS = ["chiragkhati04@gmail.com", "zprootech@gmail.com","insightfusionanalytics@gmail.com","khativijaya@gmail.com","soorajrajeevoff@gmail.com"];
 
 const createCustomAdapter = () => {
   const adapter = MongoDBAdapter(clientPromise);

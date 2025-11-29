@@ -230,7 +230,7 @@ export default function BonusLeaderboard({ readOnly = false }: BonusLeaderboardP
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[1600px]">
-            <thead className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white">
+            <thead className="bg-linear-to-r from-emerald-600 to-teal-600 text-white">
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase">Employee</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase">Metrics</th>
