@@ -33,6 +33,9 @@ export async function POST(request: NextRequest) {
           whatsappGroupLink: data.whatsappGroupLink || null,
           tags: data.tags || [],
           priority: data.priority || 'medium',
+          // New: project-level incentive configuration
+          bonusPoints: typeof data.bonusPoints === 'number' ? data.bonusPoints : 50,
+          penaltyPoints: typeof data.penaltyPoints === 'number' ? data.penaltyPoints : 0,
           status: 'in_progress',
           assignedAt: new Date(),
           assignedBy: new ObjectId(session.user.id),

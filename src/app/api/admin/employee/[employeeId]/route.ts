@@ -1,23 +1,33 @@
-import {NextRequest, NextResponse} from "next/server";
-import {getServerSession} from "next-auth";
+import { NextRequest, NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "../../../auth/[...nextauth]/route";
 import clientPromise from "@/lib/mongodb";
-import {dbConnect} from "@/lib/mongodb";
-import {DailyUpdate, User} from "@/models";
-import {ObjectId} from "mongodb";
+import { dbConnect } from "@/lib/mongodb";
+import { DailyUpdate, User } from "@/models";
+import { ObjectId } from "mongodb";
+import { isAdminOrHasPermission } from "@/lib/permission-helpers";
+import { PERMISSIONS } from "@/lib/permission-constants";
 
 export async function GET(
   request: NextRequest,
-  context: {params: Promise<{employeeId: string}>}
+  context: { params: Promise<{ employeeId: string }> }
 ) {
   try {
     const params = await context.params;
-    const {employeeId} = params;
+    const { employeeId } = params;
 
     console.log("Received employeeId:", employeeId);
 
-    const session = await getServerSession();
-    if (!session?.user) {
-      return NextResponse.json({error: "Unauthorized"}, {status: 401});
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    // Check if admin or has VIEW_EMPLOYEES or MANAGE_EMPLOYEES permission
+    const hasAccess = await isAdminOrHasPermission(PERMISSIONS.VIEW_EMPLOYEES) || 
+                      await isAdminOrHasPermission(PERMISSIONS.MANAGE_EMPLOYEES);
+    if (!hasAccess) {
+      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
     }
 
     // Connect to DB first
@@ -25,20 +35,12 @@ export async function GET(
     const client = await clientPromise;
     const db = client.db("worknest");
 
-    // Check if admin using MongoDB native driver instead of Mongoose
-    const adminUser = await db
-      .collection("users")
-      .findOne({email: session.user.email});
-    if (!adminUser || adminUser.role !== "admin") {
-      return NextResponse.json({error: "Forbidden"}, {status: 403});
-    }
-
     // Validate ObjectId format
     if (!ObjectId.isValid(employeeId)) {
       console.error("Invalid ObjectId format:", employeeId);
       return NextResponse.json(
-        {error: "Invalid employee ID format"},
-        {status: 400}
+        { error: "Invalid employee ID format" },
+        { status: 400 }
       );
     }
 
@@ -50,26 +52,26 @@ export async function GET(
     console.log("Found profile:", profile ? "Yes" : "No");
 
     if (!profile) {
-      return NextResponse.json({error: "Employee not found"}, {status: 404});
+      return NextResponse.json({ error: "Employee not found" }, { status: 404 });
     }
 
     // The userId from employeeProfile is the actual user ID in our system
-    const dailyUpdates = await DailyUpdate.find({employeeId: profile.userId})
-      .sort({date: -1})
+    const dailyUpdates = await DailyUpdate.find({ employeeId: profile.userId })
+      .sort({ date: -1 })
       .limit(30);
 
     // Fetch attendance records
     const attendanceRecords = await db
       .collection("attendance")
-      .find({userId: profile.userId})
-      .sort({date: -1})
+      .find({ userId: profile.userId })
+      .sort({ date: -1 })
       .limit(30)
       .toArray();
 
     // Fetch user to get email using native MongoDB driver
     const user = await db
       .collection("users")
-      .findOne({_id: new ObjectId(profile.userId)});
+      .findOne({ _id: new ObjectId(profile.userId) });
     const userEmail = user?.email || profile.email || "";
 
     console.log("Found daily updates:", dailyUpdates.length);
@@ -106,8 +108,8 @@ export async function GET(
   } catch (error) {
     console.error("Error in employee detail API:", error);
     return NextResponse.json(
-      {error: "Internal server error", details: String(error)},
-      {status: 500}
+      { error: "Internal server error", details: String(error) },
+      { status: 500 }
     );
   }
 }

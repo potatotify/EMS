@@ -1,7 +1,8 @@
 "use client";
 
 import {useSession} from "next-auth/react";
-import {Calendar, Clock, User, TrendingUp, Lock} from "lucide-react";
+import {useRouter} from "next/navigation";
+import {Calendar, Clock, User, TrendingUp, Lock, ListTodo} from "lucide-react";
 
 interface Project {
   _id: string;
@@ -26,6 +27,7 @@ export default function ProjectProgressCard({
   onUpdate
 }: ProjectProgressCardProps) {
   const {data: session} = useSession();
+  const router = useRouter();
   
   // Check if current user is the lead assignee
   const userId = (session?.user as any)?.id;
@@ -139,20 +141,29 @@ export default function ProjectProgressCard({
         </div>
       )}
 
-      {isLeadAssignee ? (
+      <div className="flex gap-2">
         <button
-          onClick={() => onUpdate(project)}
-          className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium transition-colors"
+          onClick={() => router.push(`/employee/project-tasks?projectId=${project._id}`)}
+          className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
         >
-          <TrendingUp className="w-4 h-4" />
-          Submit Daily Project Update
+          <ListTodo className="w-4 h-4" />
+          View Tasks
         </button>
-      ) : (
-        <div className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 bg-gray-300 text-gray-600 rounded-lg font-medium cursor-not-allowed">
-          <Lock className="w-4 h-4" />
-          Only Lead Assignee Can Submit Updates
-        </div>
-      )}
+        {isLeadAssignee ? (
+          <button
+            onClick={() => onUpdate(project)}
+            className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium transition-colors"
+          >
+            <TrendingUp className="w-4 h-4" />
+            Submit Update
+          </button>
+        ) : (
+          <div className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 bg-gray-300 text-gray-600 rounded-lg font-medium cursor-not-allowed">
+            <Lock className="w-4 h-4" />
+            Lead Only
+          </div>
+        )}
+      </div>
     </div>
   );
 }

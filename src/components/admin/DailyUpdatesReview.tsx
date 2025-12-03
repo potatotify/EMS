@@ -1,9 +1,25 @@
 "use client";
 
-import {useState, useEffect} from "react";
-import {useSession} from "next-auth/react";
-import {motion} from "framer-motion";
-import {CheckCircle, XCircle, CheckSquare, Square, Edit2, Save, X, RefreshCw, Search, Calendar} from "lucide-react";
+import { useState, useEffect, useMemo } from "react";
+import { useSession } from "next-auth/react";
+import { motion } from "framer-motion";
+import {
+  CheckCircle,
+  XCircle,
+  CheckSquare,
+  Square,
+  RefreshCw,
+  Search,
+  Calendar,
+  Check,
+  Trash2
+} from "lucide-react";
+
+interface ChecklistItem {
+  label: string;
+  checked: boolean;
+  type: 'global' | 'role' | 'custom';
+}
 
 interface DailyUpdate {
   _id: string;
@@ -14,33 +30,34 @@ interface DailyUpdate {
   };
   date: string;
   status: "pending" | "submitted" | "reviewed" | "approved";
-  score: number;
-  adminScore: number;
   adminNotes: string;
   adminApproved: boolean;
 
-  // Essential Daily Updates
-  workedOnProject: boolean;
-  updatedDailyProgress: boolean;
-  recordedLoomVideos: boolean;
-  updatedClient: boolean;
-  completedAllTasks: boolean;
+  // New dynamic checklist
+  checklist?: ChecklistItem[];
+
+  // Legacy fields (for backward compatibility)
+  workedOnProject?: boolean;
+  updatedDailyProgress?: boolean;
+  recordedLoomVideos?: boolean;
+  updatedClient?: boolean;
+  completedAllTasks?: boolean;
   tasksForTheDay: string;
   hoursWorked: number;
   additionalNotes: string;
 }
 
-// Define only essential checkbox fields
-const checkboxFields = [
-  {key: "workedOnProject", label: "Worked on Project", shortLabel: "Project"},
-  {key: "updatedDailyProgress", label: "Daily Progress", shortLabel: "Progress"},
-  {key: "recordedLoomVideos", label: "Loom Videos", shortLabel: "Loom"},
-  {key: "updatedClient", label: "Updated Client", shortLabel: "Client"},
-  {key: "completedAllTasks", label: "All Tasks Done", shortLabel: "Done"}
+// Legacy fields mapping
+const legacyFields = [
+  { key: "workedOnProject", label: "Worked on Project" },
+  { key: "updatedDailyProgress", label: "Daily Progress" },
+  { key: "recordedLoomVideos", label: "Loom Videos" },
+  { key: "updatedClient", label: "Updated Client" },
+  { key: "completedAllTasks", label: "All Tasks Done" }
 ];
 
 export default function DailyUpdatesReview() {
-  const {data: session} = useSession();
+  const { data: session } = useSession();
   const [updates, setUpdates] = useState<DailyUpdate[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
@@ -48,8 +65,9 @@ export default function DailyUpdatesReview() {
     new Date().toISOString().split("T")[0]
   );
   const [filterEmployee, setFilterEmployee] = useState("");
-  const [editingUpdate, setEditingUpdate] = useState<string | null>(null);
-  const [editData, setEditData] = useState<Record<string, any>>({});
+  const [drafts, setDrafts] = useState<Record<string, DailyUpdate>>({});
+  const [bulkApproving, setBulkApproving] = useState(false);
+  const [approvingId, setApprovingId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchUpdates();
@@ -72,7 +90,32 @@ export default function DailyUpdatesReview() {
         return;
       }
 
-      setUpdates(Array.isArray(data) ? data : []);
+      // Normalize updates to include checklist if missing
+      const normalizedUpdates = (Array.isArray(data) ? data : []).map((u: DailyUpdate) => {
+        if (!u.checklist || u.checklist.length === 0) {
+          return {
+            ...u,
+            checklist: legacyFields.map(f => ({
+              label: f.label,
+              checked: !!u[f.key as keyof DailyUpdate],
+              type: "global" as const
+            }))
+          };
+        }
+        return u;
+      });
+
+      setUpdates(normalizedUpdates);
+
+      // Initialize editable drafts from normalized data
+      const draftMap: Record<string, DailyUpdate> = {};
+      normalizedUpdates.forEach((u) => {
+        draftMap[u._id] = {
+          ...u,
+          checklist: u.checklist ? [...u.checklist] : []
+        };
+      });
+      setDrafts(draftMap);
     } catch (error) {
       console.error("Error fetching updates:", error);
       setUpdates([]);
@@ -80,6 +123,23 @@ export default function DailyUpdatesReview() {
       setLoading(false);
     }
   };
+
+  // Extract all unique checklist labels to form columns
+  const checklistColumns = useMemo(() => {
+    const labels = new Set<string>();
+    updates.forEach(u => {
+      u.checklist?.forEach(c => labels.add(c.label));
+    });
+    // Sort to keep consistent order, maybe prioritize legacy ones?
+    return Array.from(labels).sort((a, b) => {
+      const aIndex = legacyFields.findIndex(f => f.label === a);
+      const bIndex = legacyFields.findIndex(f => f.label === b);
+      if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex;
+      if (aIndex !== -1) return -1;
+      if (bIndex !== -1) return 1;
+      return a.localeCompare(b);
+    });
+  }, [updates]);
 
   const toggleRowSelection = (updateId: string) => {
     setSelectedRows((prev) => {
@@ -101,72 +161,203 @@ export default function DailyUpdatesReview() {
     }
   };
 
-  const handleCheckboxChange = (updateId: string, field: string, value: boolean) => {
-    if (!editData[updateId]) {
-      const update = updates.find((u) => u._id === updateId);
-      if (update) {
-        setEditData((prev) => ({
-          ...prev,
-          [updateId]: {...update}
-        }));
+  const handleChecklistChange = (updateId: string, label: string, checked: boolean) => {
+    setDrafts((prev) => {
+      const current = prev[updateId] || updates.find((u) => u._id === updateId);
+      if (!current) return prev;
+
+      const existingChecklist = current.checklist || [];
+      let newChecklist = existingChecklist.map((item: ChecklistItem) =>
+        item.label === label ? { ...item, checked } : item
+      );
+
+      // If the label doesn't exist yet (because columns come from all updates), add it
+      const exists = newChecklist.find((item: ChecklistItem) => item.label === label);
+      if (!exists) {
+        newChecklist = [
+          ...newChecklist,
+          {
+            label,
+            checked,
+            type: "custom"
+          }
+        ];
+      }
+
+      return {
+        ...prev,
+        [updateId]: {
+          ...current,
+          checklist: newChecklist
+        }
+      };
+    });
+  };
+
+  const handleHoursChange = (updateId: string, value: string) => {
+    const hours = value === "" ? 0 : Number(value);
+    if (Number.isNaN(hours) || hours < 0) return;
+
+    setDrafts((prev) => {
+      const current = prev[updateId] || updates.find((u) => u._id === updateId);
+      if (!current) return prev;
+
+      return {
+        ...prev,
+        [updateId]: {
+          ...current,
+          hoursWorked: hours
+        }
+      };
+    });
+  };
+
+  // Compare original update vs current draft to see if anything changed
+  const isRowDirty = (original: DailyUpdate, draft: DailyUpdate) => {
+    if (!draft) return false;
+
+    // Hours changed
+    if ((original.hoursWorked || 0) !== (draft.hoursWorked || 0)) {
+      return true;
+    }
+
+    const origChecklist = original.checklist || [];
+    const draftChecklist = draft.checklist || [];
+
+    if (origChecklist.length !== draftChecklist.length) {
+      return true;
+    }
+
+    // Compare checklist by label + checked flag (ignore order differences by normalizing)
+    const normalizeList = (list: ChecklistItem[]) =>
+      [...list]
+        .map((c) => ({ label: c.label, checked: !!c.checked }))
+        .sort((a, b) => a.label.localeCompare(b.label));
+
+    const a = normalizeList(origChecklist);
+    const b = normalizeList(draftChecklist);
+
+    for (let i = 0; i < a.length; i++) {
+      if (a[i].label !== b[i].label || a[i].checked !== b[i].checked) {
+        return true;
       }
     }
-    setEditData((prev) => ({
-      ...prev,
-      [updateId]: {
-        ...prev[updateId],
-        [field]: value
-      }
-    }));
+
+    return false;
   };
 
-  const calculateAutoScore = (data: DailyUpdate | any) => {
-    let checkedCount = 0;
-    checkboxFields.forEach((field) => {
-      if (data[field.key]) checkedCount++;
-    });
-    // Score based on essential fields (5 fields = 100%)
-    return Math.round((checkedCount / checkboxFields.length) * 100);
+  const buildApprovalPayload = (update: DailyUpdate) => {
+    const checklist = update.checklist || [];
+
+    return {
+      status: "approved",
+      adminApproved: true,
+      checklist,
+      tasksForTheDay: update.tasksForTheDay || "",
+      hoursWorked: update.hoursWorked || 0,
+      additionalNotes: update.additionalNotes || ""
+    };
   };
 
-  const handleSaveUpdate = async (updateId: string) => {
-    const update = editData[updateId];
-    if (!update) return;
+  const approveSingle = async (updateId: string) => {
+    const baseUpdate = drafts[updateId] || updates.find((u) => u._id === updateId);
+    if (!baseUpdate) return;
 
     try {
-      const autoScore = calculateAutoScore(update);
+      setApprovingId(updateId);
+      const payload = buildApprovalPayload(baseUpdate);
+
       const response = await fetch(`/api/daily-updates/${updateId}`, {
         method: "PUT",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-          status: "reviewed",
-          adminScore: autoScore,
-          adminNotes: update.adminNotes || "",
-          adminApproved: update.adminApproved || false,
-          ...Object.fromEntries(
-            checkboxFields.map((f) => [f.key, update[f.key] || false])
-          ),
-          tasksForTheDay: update.tasksForTheDay || "",
-          hoursWorked: update.hoursWorked || 0,
-          additionalNotes: update.additionalNotes || ""
-        })
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
       });
 
-      if (response.ok) {
-        setEditingUpdate(null);
-        setEditData((prev) => {
-          const newData = {...prev};
-          delete newData[updateId];
-          return newData;
-        });
-        fetchUpdates();
-        alert("Update saved successfully!");
-      } else {
-        alert("Failed to save update");
+      if (!response.ok) {
+        alert("Failed to approve update");
+        return;
       }
+
+      // Refresh list to reflect latest data
+      await fetchUpdates();
+      setSelectedRows((prev) => {
+        const next = new Set(prev);
+        next.delete(updateId);
+        return next;
+      });
     } catch (error) {
-      console.error("Error saving update:", error);
-      alert("Error saving update");
+      console.error("Error approving update:", error);
+      alert("Error approving update");
+    } finally {
+      setApprovingId(null);
+    }
+  };
+
+  const approveSelected = async () => {
+    if (selectedRows.size === 0) return;
+
+    try {
+      setBulkApproving(true);
+      const ids = Array.from(selectedRows);
+
+      for (const id of ids) {
+        const baseUpdate = drafts[id] || updates.find((u) => u._id === id);
+        if (!baseUpdate) continue;
+
+        const payload = buildApprovalPayload(baseUpdate);
+        const response = await fetch(`/api/daily-updates/${id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+          console.error("Failed to approve update", id);
+        }
+      }
+
+      await fetchUpdates();
+      setSelectedRows(new Set());
+    } catch (error) {
+      console.error("Error approving selected updates:", error);
+      alert("Error approving selected updates");
+    } finally {
+      setBulkApproving(false);
+    }
+  };
+
+  const deleteUpdate = async (updateId: string) => {
+    if (!confirm("Are you sure you want to delete this daily update? This action cannot be undone.")) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/daily-updates/${updateId}`, {
+        method: "DELETE"
+      });
+
+      if (!response.ok) {
+        alert("Failed to delete update");
+        return;
+      }
+
+      // Remove from local state and refresh
+      setUpdates((prev) => prev.filter((u) => u._id !== updateId));
+      setDrafts((prev) => {
+        const newDrafts = { ...prev };
+        delete newDrafts[updateId];
+        return newDrafts;
+      });
+      setSelectedRows((prev) => {
+        const next = new Set(prev);
+        next.delete(updateId);
+        return next;
+      });
+      
+      alert("Daily update deleted successfully");
+    } catch (error) {
+      console.error("Error deleting update:", error);
+      alert("Error deleting update");
     }
   };
 
@@ -179,9 +370,8 @@ export default function DailyUpdatesReview() {
     };
     return (
       <span
-        className={`px-2.5 py-1 rounded-md text-xs font-medium border ${
-          colors[status as keyof typeof colors] || colors.pending
-        }`}
+        className={`px-2.5 py-1 rounded-md text-xs font-medium border ${colors[status as keyof typeof colors] || colors.pending
+          }`}
       >
         {status.charAt(0).toUpperCase() + status.slice(1)}
       </span>
@@ -242,8 +432,8 @@ export default function DailyUpdatesReview() {
           </div>
           <div className="flex items-end">
             <motion.button
-              whileHover={{scale: 1.02}}
-              whileTap={{scale: 0.98}}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
               onClick={fetchUpdates}
               className="w-full px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 text-white rounded-xl hover:from-emerald-600 hover:to-teal-700 transition-all font-semibold flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/25 hover:shadow-xl hover:shadow-emerald-500/30"
             >
@@ -282,24 +472,20 @@ export default function DailyUpdatesReview() {
                 <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider">
                   Date
                 </th>
-                <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider">
+                <th className="px-6 py-4 text-center text-xs font-semibold uppercase tracking-wider">
                   Status
                 </th>
                 <th className="px-6 py-4 text-center text-xs font-semibold uppercase tracking-wider">
                   Hours
                 </th>
-                <th className="px-6 py-4 text-center text-xs font-semibold uppercase tracking-wider">
-                  Score
-                </th>
-                {checkboxFields.map((field) => (
+                {checklistColumns.map((label) => (
                   <th
-                    key={field.key}
+                    key={label}
                     className="px-4 py-4 text-center text-xs font-semibold uppercase tracking-wider"
-                    title={field.label}
+                    title={label}
                   >
                     <div className="flex flex-col items-center">
-                      <span className="hidden md:inline">{field.label}</span>
-                      <span className="md:hidden">{field.shortLabel}</span>
+                      <span className="whitespace-nowrap">{label}</span>
                     </div>
                   </th>
                 ))}
@@ -315,7 +501,7 @@ export default function DailyUpdatesReview() {
               {updates.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={checkboxFields.length + 8}
+                    colSpan={checklistColumns.length + 8}
                     className="px-6 py-16 text-center"
                   >
                     <div className="flex flex-col items-center gap-3">
@@ -331,20 +517,18 @@ export default function DailyUpdatesReview() {
                 </tr>
               ) : (
                 updates.map((update) => {
-                  const isEditing = editingUpdate === update._id;
-                  const currentData = isEditing
-                    ? editData[update._id] || update
-                    : update;
+                  const currentData = drafts[update._id] || update;
                   const isSelected = selectedRows.has(update._id);
+                  const isApproved = update.adminApproved || update.status === "approved";
+                  const dirty = isRowDirty(update, currentData);
 
                   return (
                     <tr
                       key={update._id}
-                      className={`transition-colors ${
-                        isSelected 
-                          ? "bg-emerald-50/50 hover:bg-emerald-100/50" 
+                      className={`transition-colors ${isSelected
+                          ? "bg-emerald-50/50 hover:bg-emerald-100/50"
                           : "hover:bg-neutral-50/50"
-                      } ${isEditing ? "bg-blue-50/50" : ""}`}
+                        }`}
                     >
                       <td className="px-6 py-4 whitespace-nowrap">
                         <button
@@ -378,98 +562,95 @@ export default function DailyUpdatesReview() {
                           })}
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        {getStatusBadge(update.status)}
+                      <td className="px-6 py-4 whitespace-nowrap text-center">
+                        {isApproved ? (
+                          getStatusBadge("approved")
+                        ) : (
+                          getStatusBadge(update.status)
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-center">
-                        <span className="text-sm font-semibold text-neutral-900">
-                          {update.hoursWorked || 0}h
-                        </span>
+                        <input
+                          type="number"
+                          min={0}
+                          step={0.5}
+                          value={currentData.hoursWorked ?? 0}
+                          onChange={(e) =>
+                            handleHoursChange(update._id, e.target.value)
+                          }
+                          className="w-20 px-2 py-1 border border-neutral-300 rounded-lg text-sm text-center focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                        />
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-center">
-                        <span className={`inline-flex items-center justify-center px-2.5 py-1 rounded-lg text-sm font-bold ${
-                          (update.adminScore || update.score || 0) >= 80 
-                            ? 'bg-green-100 text-green-700' 
-                            : (update.adminScore || update.score || 0) >= 60 
-                            ? 'bg-yellow-100 text-yellow-700' 
-                            : 'bg-red-100 text-red-700'
-                        }`}>
-                          {update.adminScore || update.score || 0}%
-                        </span>
-                      </td>
-                      {checkboxFields.map((field) => (
-                        <td key={field.key} className="px-4 py-4 whitespace-nowrap text-center">
-                          {isEditing ? (
+                      {checklistColumns.map((label) => {
+                        const item = currentData.checklist?.find((c: ChecklistItem) => c.label === label);
+                        const isChecked = item?.checked || false;
+
+                        return (
+                          <td key={label} className="px-4 py-4 whitespace-nowrap text-center">
                             <input
                               type="checkbox"
-                              checked={currentData[field.key] || false}
+                              checked={isChecked}
                               onChange={(e) =>
-                                handleCheckboxChange(
+                                handleChecklistChange(
                                   update._id,
-                                  field.key,
+                                  label,
                                   e.target.checked
                                 )
                               }
                               className="w-5 h-5 text-emerald-600 rounded-lg focus:ring-2 focus:ring-emerald-500 cursor-pointer"
                             />
-                          ) : (
-                            <div className="flex justify-center">
-                              {currentData[field.key] ? (
-                                <CheckCircle className="w-6 h-6 text-green-600" />
-                              ) : (
-                                <XCircle className="w-6 h-6 text-neutral-300" />
-                              )}
-                            </div>
-                          )}
-                        </td>
-                      ))}
+                          </td>
+                        );
+                      })}
                       <td className="px-6 py-4 max-w-xs">
-                        <div className="truncate text-sm text-neutral-700" title={update.tasksForTheDay || ""}>
-                          {update.tasksForTheDay || (
+                        <div
+                          className="truncate text-sm text-neutral-700"
+                          title={currentData.tasksForTheDay || ""}
+                        >
+                          {currentData.tasksForTheDay || (
                             <span className="text-neutral-400 italic">No tasks listed</span>
                           )}
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-center">
-                        {isEditing ? (
-                          <div className="flex gap-2 justify-center">
+                        <div className="flex items-center justify-center gap-2">
+                          {isApproved ? (
+                            <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-semibold bg-green-100 text-green-800 border border-green-300">
+                              <CheckCircle className="w-4 h-4" />
+                              Approved
+                            </span>
+                          ) : (
                             <motion.button
-                              whileHover={{scale: 1.1}}
-                              whileTap={{scale: 0.9}}
-                              onClick={() => handleSaveUpdate(update._id)}
-                              className="p-2 bg-gradient-to-r from-emerald-500 to-teal-600 text-white rounded-lg hover:from-emerald-600 hover:to-teal-700 transition-all shadow-md hover:shadow-lg"
-                              title="Save changes"
+                              whileHover={approvingId !== update._id ? { scale: 1.05 } : {}}
+                              whileTap={approvingId !== update._id ? { scale: 0.97 } : {}}
+                              disabled={approvingId === update._id || bulkApproving}
+                              onClick={() => approveSingle(update._id)}
+                              className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-semibold shadow-sm border transition-all ${
+                                approvingId === update._id || bulkApproving
+                                  ? "bg-emerald-200 text-emerald-800 border-emerald-300 cursor-not-allowed opacity-60"
+                                  : "bg-emerald-600 text-white border-emerald-700 hover:bg-emerald-700 hover:border-emerald-800"
+                              }`}
+                              title={
+                                approvingId === update._id
+                                  ? "Approving..."
+                                  : "Approve this update"
+                              }
                             >
-                              <Save className="w-4 h-4" />
+                              <Check className="w-4 h-4" />
+                              {approvingId === update._id ? "Approving..." : "Approve"}
                             </motion.button>
-                            <motion.button
-                              whileHover={{scale: 1.1}}
-                              whileTap={{scale: 0.9}}
-                              onClick={() => {
-                                setEditingUpdate(null);
-                                setEditData((prev) => {
-                                  const newData = {...prev};
-                                  delete newData[update._id];
-                                  return newData;
-                                });
-                              }}
-                              className="p-2 bg-neutral-400 text-white rounded-lg hover:bg-neutral-500 transition-all shadow-md hover:shadow-lg"
-                              title="Cancel editing"
-                            >
-                              <X className="w-4 h-4" />
-                            </motion.button>
-                          </div>
-                        ) : (
+                          )}
                           <motion.button
-                            whileHover={{scale: 1.1}}
-                            whileTap={{scale: 0.9}}
-                            onClick={() => setEditingUpdate(update._id)}
-                            className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all shadow-md hover:shadow-lg"
-                            title="Edit update"
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.97 }}
+                            onClick={() => deleteUpdate(update._id)}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-semibold shadow-sm border bg-red-600 text-white border-red-700 hover:bg-red-700 hover:border-red-800 transition-all"
+                            title="Delete this update"
                           >
-                            <Edit2 className="w-4 h-4" />
+                            <Trash2 className="w-4 h-4" />
+                            Delete
                           </motion.button>
-                        )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -482,19 +663,40 @@ export default function DailyUpdatesReview() {
 
       {selectedRows.size > 0 && (
         <motion.div
-          initial={{opacity: 0, y: 10}}
-          animate={{opacity: 1, y: 0}}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
           className="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-xl p-4 flex items-center justify-between shadow-sm"
         >
-          <p className="text-sm text-emerald-900 font-semibold">
-            {selectedRows.size} row{selectedRows.size !== 1 ? 's' : ''} selected
-          </p>
-          <button
-            onClick={() => setSelectedRows(new Set())}
-            className="text-sm text-emerald-700 hover:text-emerald-900 font-medium underline transition-colors"
-          >
-            Clear selection
-          </button>
+          <div>
+            <p className="text-sm text-emerald-900 font-semibold">
+              {selectedRows.size} update{selectedRows.size !== 1 ? "s" : ""} selected for approval
+            </p>
+            <p className="text-xs text-emerald-800 mt-0.5">
+              Checklist changes and hours will be saved when you approve.
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setSelectedRows(new Set())}
+              className="text-sm text-emerald-700 hover:text-emerald-900 font-medium underline transition-colors"
+            >
+              Clear selection
+            </button>
+            <motion.button
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.97 }}
+              disabled={bulkApproving}
+              onClick={approveSelected}
+              className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold shadow-sm border transition-all ${
+                bulkApproving
+                  ? "bg-emerald-200 text-emerald-800 border-emerald-300 cursor-not-allowed"
+                  : "bg-emerald-600 text-white border-emerald-700 hover:bg-emerald-700 hover:border-emerald-800"
+              }`}
+            >
+              <Check className="w-4 h-4" />
+              {bulkApproving ? "Approving..." : "Approve selected"}
+            </motion.button>
+          </div>
         </motion.div>
       )}
     </div>

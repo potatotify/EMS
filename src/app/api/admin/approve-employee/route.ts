@@ -3,14 +3,21 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import clientPromise from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
+import { isAdminOrHasPermission } from '@/lib/permission-helpers';
+import { PERMISSIONS } from '@/lib/permission-constants';
 
 export async function POST(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
     
-    // Check if user is admin
-    if (!session || session.user.role !== 'admin') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // Check if admin or has APPROVE_EMPLOYEES permission
+    const hasAccess = await isAdminOrHasPermission(PERMISSIONS.APPROVE_EMPLOYEES);
+    if (!hasAccess) {
+      return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
     }
 
     const { userId, approve } = await request.json();

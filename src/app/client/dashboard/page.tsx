@@ -2,7 +2,7 @@
 
 import {useSession} from "next-auth/react";
 import {useRouter} from "next/navigation";
-import {Plus, FolderKanban, Clock, CheckCircle2, Eye, LayoutDashboard} from "lucide-react";
+import {Plus, FolderKanban, Clock, CheckCircle2, Eye, LayoutDashboard, ChevronLeft, ChevronRight} from "lucide-react";
 import {useEffect, useState} from "react";
 import {motion} from "framer-motion";
 import Header from "@/components/shared/Header";
@@ -40,6 +40,25 @@ export default function ClientDashboard() {
   const [loading, setLoading] = useState(true);
   const [viewProjectId, setViewProjectId] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<SectionType>("projects");
+  
+  // Sidebar collapse state with localStorage persistence
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("client-sidebar-collapsed");
+      return saved === "true";
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("client-sidebar-collapsed", String(isSidebarCollapsed));
+    }
+  }, [isSidebarCollapsed]);
+
+  const toggleSidebar = () => {
+    setIsSidebarCollapsed(!isSidebarCollapsed);
+  };
 
   useEffect(() => {
     if (status === "authenticated") {
@@ -179,42 +198,55 @@ export default function ClientDashboard() {
       <Header 
         title="Client Dashboard" 
         userName={session?.user?.name || ""}
-        overviewStats={[
-          {
-            label: "Total",
-            value: projects.length,
-            icon: <FolderKanban className="w-4 h-4" />,
-            color: "from-emerald-500 to-teal-500"
-          },
-          {
-            label: "In Progress",
-            value: inProgressProjects.length,
-            icon: <Clock className="w-4 h-4" />,
-            color: "from-blue-500 to-cyan-500"
-          },
-          {
-            label: "Completed",
-            value: completedProjects.length,
-            icon: <CheckCircle2 className="w-4 h-4" />,
-            color: "from-green-500 to-emerald-500"
-          }
-        ]}
       />
 
       <div className="flex h-[calc(100vh-80px)]">
-        {/* Left Sidebar */}
-        <aside className="w-64 bg-white/90 backdrop-blur-sm border-r border-emerald-100/50 shadow-lg flex flex-col">
+        {/* Left Sidebar - Collapsible */}
+        <motion.aside
+          initial={false}
+          animate={{
+            width: isSidebarCollapsed ? "80px" : "256px",
+          }}
+          transition={{
+            duration: 0.3,
+            ease: [0.4, 0, 0.2, 1],
+          }}
+          className="bg-white/90 backdrop-blur-sm border-r border-emerald-100/50 shadow-lg flex flex-col relative"
+        >
+          {/* Toggle Button */}
+          <motion.button
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.9 }}
+            onClick={toggleSidebar}
+            className="absolute -right-3 top-6 z-20 w-6 h-6 rounded-full bg-white border-2 border-emerald-200 shadow-md flex items-center justify-center text-emerald-600 hover:text-emerald-700 hover:border-emerald-300 transition-colors"
+            aria-label={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {isSidebarCollapsed ? (
+              <ChevronRight className="w-4 h-4" />
+            ) : (
+              <ChevronLeft className="w-4 h-4" />
+            )}
+          </motion.button>
+
           {/* Navigation Items */}
           <nav className="flex-1 overflow-y-auto p-4">
-            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+            <motion.h3
+              initial={false}
+              animate={{
+                opacity: isSidebarCollapsed ? 0 : 1,
+                height: isSidebarCollapsed ? 0 : "auto",
+              }}
+              transition={{ duration: 0.2 }}
+              className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 overflow-hidden"
+            >
               Sections
-            </h3>
+            </motion.h3>
             <div className="space-y-1">
               {sidebarItems.map((item) => (
                 <motion.button
                   key={item.id}
-                  whileHover={{scale: 1.02}}
-                  whileTap={{scale: 0.98}}
+                  whileHover={{ scale: 1.02, x: isSidebarCollapsed ? 0 : 4 }}
+                  whileTap={{ scale: 0.98 }}
                   onClick={() => {
                     setActiveSection(item.id);
                     if (item.id === "create-project") {
@@ -225,15 +257,33 @@ export default function ClientDashboard() {
                     activeSection === item.id
                       ? "bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-lg"
                       : "bg-gray-50/50 text-gray-700 hover:bg-gray-100/50"
-                  }`}
+                  } ${isSidebarCollapsed ? "justify-center" : ""}`}
+                  title={isSidebarCollapsed ? item.title : undefined}
                 >
-                  {item.icon}
-                  <span className="flex-1 font-medium">{item.title}</span>
+                  <motion.div
+                    animate={{
+                      scale: activeSection === item.id ? 1.1 : 1,
+                    }}
+                    className="flex-shrink-0"
+                  >
+                    {item.icon}
+                  </motion.div>
+                  <motion.span
+                    initial={false}
+                    animate={{
+                      opacity: isSidebarCollapsed ? 0 : 1,
+                      width: isSidebarCollapsed ? 0 : "auto",
+                    }}
+                    transition={{ duration: 0.2 }}
+                    className="flex-1 font-medium overflow-hidden whitespace-nowrap"
+                  >
+                    {item.title}
+                  </motion.span>
                 </motion.button>
               ))}
             </div>
           </nav>
-        </aside>
+        </motion.aside>
 
         {/* Main Content Area */}
         <main className="flex-1 overflow-y-auto">

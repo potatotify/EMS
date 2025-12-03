@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth/next';
+import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { dbConnect } from '@/lib/mongodb';
 import { DailyUpdate, User } from '@/models';
 
@@ -11,7 +12,7 @@ export async function GET(
     const { id } = await params;
     await dbConnect();
     
-    const session = await getServerSession();
+    const session = await getServerSession(authOptions);
     if (!session?.user) {
       return NextResponse.json(
         { error: 'Unauthorized' },
@@ -63,7 +64,7 @@ export async function PUT(
     const { id } = await params;
     await dbConnect();
     
-    const session = await getServerSession();
+    const session = await getServerSession(authOptions);
     if (!session?.user) {
       return NextResponse.json(
         { error: 'Unauthorized' },
@@ -89,7 +90,7 @@ export async function PUT(
 
     const data = await request.json();
     
-    // Allow updating all fields including checkboxes
+    // Allow updating all fields including checklist and checkboxes
     const updateData: any = {
       status: data.status || 'reviewed',
       adminNotes: data.adminNotes || '',
@@ -97,6 +98,11 @@ export async function PUT(
       adminApproved: data.adminApproved || false,
       lastModified: new Date()
     };
+
+    // Optional: update dynamic checklist if provided
+    if (Array.isArray(data.checklist)) {
+      updateData.checklist = data.checklist;
+    }
 
     // Allow admin to override any checkbox fields
     const checkboxFields = [
@@ -141,6 +147,57 @@ export async function PUT(
     console.error('Error updating daily update:', error);
     return NextResponse.json(
       { error: 'Failed to update daily update' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    await dbConnect();
+    
+    const session = await getServerSession(authOptions);
+    if (!session?.user) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
+
+    const user = await User.findOne({ email: session.user.email });
+    if (!user) {
+      return NextResponse.json(
+        { error: 'User not found' },
+        { status: 404 }
+      );
+    }
+
+    // Only allow admin to delete updates
+    if (user.role !== 'admin') {
+      return NextResponse.json(
+        { error: 'Forbidden' },
+        { status: 403 }
+      );
+    }
+
+    const update = await DailyUpdate.findByIdAndDelete(id);
+
+    if (!update) {
+      return NextResponse.json(
+        { error: 'Daily update not found' },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({ message: 'Daily update deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting daily update:', error);
+    return NextResponse.json(
+      { error: 'Failed to delete daily update' },
       { status: 500 }
     );
   }
