@@ -75,6 +75,15 @@ export async function GET(
       project.updateIncharge = await populateEmployee(project.updateIncharge) || project.updateIncharge;
     }
 
+    // Populate Assignees array
+    if (project.assignees && Array.isArray(project.assignees)) {
+      project.assignees = await Promise.all(
+        project.assignees.map(async (assigneeId: any) => {
+          return await populateEmployee(assigneeId) || assigneeId;
+        })
+      );
+    }
+
     return NextResponse.json({ project });
   } catch (error) {
     console.error('Error fetching project:', error);

@@ -36,7 +36,7 @@ interface Project {
   };
   vaIncharge?: string | { name: string; email?: string };
   freelancer?: string;
-  updateIncharge?: string | { name: string; email?: string };
+  assignees?: Array<string | { name: string; email?: string; _id?: string }>;
   codersRecommendation?: string;
   leadership?: string;
   githubLink?: string;
@@ -429,15 +429,21 @@ export default function ProjectDetailsModal({
                   )}
                 </div>
               )}
-              {project.updateIncharge && (
+              {project.assignees && Array.isArray(project.assignees) && project.assignees.length > 0 && (
                 <div>
-                  <p className="text-gray-600 font-medium">Update Incharge</p>
-                  <p className="text-gray-900">
-                    {typeof project.updateIncharge === 'object' ? project.updateIncharge.name : project.updateIncharge}
-                  </p>
-                  {typeof project.updateIncharge === 'object' && project.updateIncharge.email && (
-                    <p className="text-gray-500 text-xs">{project.updateIncharge.email}</p>
-                  )}
+                  <p className="text-gray-600 font-medium">Assignees ({project.assignees.length})</p>
+                  <div className="space-y-1">
+                    {project.assignees.map((assignee, index) => (
+                      <div key={index}>
+                        <p className="text-gray-900">
+                          {typeof assignee === 'object' ? assignee.name : assignee}
+                        </p>
+                        {typeof assignee === 'object' && assignee.email && (
+                          <p className="text-gray-500 text-xs">{assignee.email}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
               {project.freelancer && (

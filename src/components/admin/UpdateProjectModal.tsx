@@ -1,7 +1,13 @@
 "use client";
 
 import {useState, useEffect} from "react";
-import {X} from "lucide-react";
+import {X, Trash2} from "lucide-react";
+
+interface Client {
+  _id: string;
+  name: string;
+  email: string;
+}
 
 interface Project {
   _id: string;
@@ -9,6 +15,8 @@ interface Project {
   status: string;
   priority: string;
   clientProgress?: number;
+  clientId?: string;
+  clientName?: string;
 }
 
 interface UpdateProjectModalProps {
@@ -25,19 +33,40 @@ export default function UpdateProjectModal({
   const [formData, setFormData] = useState({
     status: "",
     priority: "",
-    clientProgress: 0
+    clientProgress: 0,
+    clientId: ""
   });
+  const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingClients, setLoadingClients] = useState(true);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
+    fetchClients();
     if (project) {
       setFormData({
         status: project.status || "",
         priority: project.priority || "medium",
-        clientProgress: project.clientProgress || 0
+        clientProgress: project.clientProgress || 0,
+        clientId: project.clientId || ""
       });
     }
   }, [project]);
+
+  const fetchClients = async () => {
+    try {
+      setLoadingClients(true);
+      const response = await fetch('/api/admin/clients');
+      const data = await response.json();
+      if (response.ok) {
+        setClients(data.clients || []);
+      }
+    } catch (error) {
+      console.error('Error fetching clients:', error);
+    } finally {
+      setLoadingClients(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -68,6 +97,35 @@ export default function UpdateProjectModal({
     }
   };
 
+  const handleDelete = async () => {
+    if (!confirm(`Are you sure you want to delete project "${project.projectName}"? This will permanently delete all related tasks, updates, messages, and other data. This action cannot be undone.`)) {
+      return;
+    }
+
+    setDeleting(true);
+
+    try {
+      const response = await fetch(`/api/admin/delete-project?projectId=${project._id}`, {
+        method: 'DELETE',
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        alert('Project and all related data deleted successfully');
+        onSuccess();
+        onClose();
+      } else {
+        alert(data.error || 'Failed to delete project');
+      }
+    } catch (error) {
+      console.error('Error deleting project:', error);
+      alert('An error occurred while deleting project');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
       <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full my-8">
@@ -84,6 +142,37 @@ export default function UpdateProjectModal({
           </button>
         </div>
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
+          {/* Client */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Client
+            </label>
+            {loadingClients ? (
+              <div className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50">
+                Loading clients...
+              </div>
+            ) : (
+              <select
+                value={formData.clientId}
+                onChange={(e) => setFormData({ ...formData, clientId: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+              >
+                <option value="">Select a client</option>
+                <option value="none">No Client (Internal Project)</option>
+                {clients.map((client) => (
+                  <option key={client._id} value={client._id}>
+                    {client.name} ({client.email})
+                  </option>
+                ))}
+              </select>
+            )}
+            {project.clientName && (
+              <p className="text-xs text-gray-500 mt-1">
+                Current client: {project.clientName}
+              </p>
+            )}
+          </div>
+
           {/* Status */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -152,6 +241,15 @@ export default function UpdateProjectModal({
           <div className="flex gap-3 pt-4 border-t">
             <button
               type="button"
+              onClick={handleDelete}
+              disabled={deleting || loading}
+              className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-semibold transition-colors disabled:opacity-50 flex items-center gap-2"
+            >
+              <Trash2 className="w-4 h-4" />
+              {deleting ? "Deleting..." : "Delete"}
+            </button>
+            <button
+              type="button"
               onClick={onClose}
               className="flex-1 px-4 py-2 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition-colors"
             >
@@ -159,7 +257,7 @@ export default function UpdateProjectModal({
             </button>
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || deleting}
               className="flex-1 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-semibold transition-colors disabled:opacity-50"
             >
               {loading ? "Updating..." : "Update Project"}

@@ -17,6 +17,11 @@ export async function POST(request: NextRequest) {
     const client = await clientPromise;
     const db = client.db('worknest');
 
+    // Convert assignees array to ObjectIds
+    const assignees = Array.isArray(data.assignees) 
+      ? data.assignees.map((id: string) => new ObjectId(id))
+      : [];
+
     // Update project with assignments
     const result = await db.collection('projects').updateOne(
       { _id: new ObjectId(data.projectId) },
@@ -25,7 +30,7 @@ export async function POST(request: NextRequest) {
           leadAssignee: data.leadAssignee ? new ObjectId(data.leadAssignee) : null,
           vaIncharge: data.vaIncharge ? new ObjectId(data.vaIncharge) : null,
           freelancer: data.freelancer || null,
-          updateIncharge: data.updateIncharge ? new ObjectId(data.updateIncharge) : null,
+          assignees: assignees, // New assignees field (array of ObjectIds)
           codersRecommendation: data.codersRecommendation || null,
           leadership: data.leadership || null,
           githubLink: data.githubLink || null,
@@ -33,6 +38,9 @@ export async function POST(request: NextRequest) {
           whatsappGroupLink: data.whatsappGroupLink || null,
           tags: data.tags || [],
           priority: data.priority || 'medium',
+          // New: project-level incentive configuration
+          bonusPoints: typeof data.bonusPoints === 'number' ? data.bonusPoints : 50,
+          penaltyPoints: typeof data.penaltyPoints === 'number' ? data.penaltyPoints : 0,
           status: 'in_progress',
           assignedAt: new Date(),
           assignedBy: new ObjectId(session.user.id),

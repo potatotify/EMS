@@ -1,107 +1,281 @@
-import {getServerSession} from "next-auth";
-import {NextRequest, NextResponse} from "next/server";
-import {authOptions} from "../../../auth/[...nextauth]/route";
-import clientPromise from "@/lib/mongodb";
-import {ObjectId} from "mongodb";
+import { NextRequest, NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "../../../auth/[...nextauth]/route";
+import clientPromise, { dbConnect } from "@/lib/mongodb";
+import Task from "@/models/Task";
+import User from "@/models/User";
+import { ObjectId } from "mongodb";
 
+// PATCH - Update task (employee can only update status for assigned tasks)
 export async function PATCH(
   request: NextRequest,
-  {params}: {params: Promise<{taskId: string}>}
+  { params }: { params: Promise<{ taskId: string }> }
 ) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || session.user?.role !== "employee") {
-      return NextResponse.json({error: "Unauthorized"}, {status: 401});
+
+    if (!session) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
 
-    const {taskId} = await params;
-    const {completed} = await request.json();
+    const { taskId } = await params;
+    const body = await request.json();
 
-    if (!ObjectId.isValid(taskId)) {
-      return NextResponse.json({error: "Invalid task ID"}, {status: 400});
+    await dbConnect();
+
+    const task = await Task.findById(taskId);
+    if (!task) {
+      return NextResponse.json({ error: "Task not found" }, { status: 404 });
     }
 
-    const client = await clientPromise;
-    const db = client.db("worknest");
+    // Check if user has permission (assigned employee or creator)
+    const taskAny = task as any;
+    const userId = session.user.id;
+    let hasPermission = false;
 
-    // Get employee's user ID
-    const user = await db.collection("users").findOne({
-      email: session.user.email
-    });
-
-    if (!user) {
-      return NextResponse.json({error: "User not found"}, {status: 404});
+    // Check if user is assigned to the task
+    if (taskAny.assignedTo) {
+      const assignedToId = taskAny.assignedTo instanceof ObjectId 
+        ? taskAny.assignedTo.toString() 
+        : taskAny.assignedTo.toString();
+      
+      if (assignedToId === userId) {
+        hasPermission = true;
+      }
     }
 
-    const userIdString = user._id.toString();
-    const userIdObj = user._id;
-
-    console.log("\n=== TASK UPDATE ===");
-    console.log("TaskId:", taskId);
-    console.log("User _id (String):", userIdString);
-    console.log("User _id (Object):", userIdObj);
-    console.log("Completed:", completed);
-
-    // Try updating with string ID first
-    let result = await db.collection("employeeTasks").updateOne(
-      {
-        _id: new ObjectId(taskId),
-        employeeId: userIdString
-      },
-      {
-        $set: {
-          completed,
-          status: completed ? "completed" : "pending",
-          completedAt: completed ? new Date() : null
+    // Check if user is in assignees array
+    if (!hasPermission && taskAny.assignees && Array.isArray(taskAny.assignees)) {
+      for (const assignee of taskAny.assignees) {
+        const assigneeId = assignee instanceof ObjectId ? assignee.toString() : 
+                          (typeof assignee === 'object' && assignee._id ? assignee._id.toString() : assignee.toString());
+        if (assigneeId === userId) {
+          hasPermission = true;
+          break;
         }
       }
-    );
-
-    console.log(
-      "Update result with string ID - matched:",
-      result.matchedCount,
-      "modified:",
-      result.modifiedCount
-    );
-
-    // If no match, try with ObjectId
-    if (result.matchedCount === 0) {
-      console.log("Trying with ObjectId format...");
-      result = await db.collection("employeeTasks").updateOne(
-        {
-          _id: new ObjectId(taskId),
-          employeeId: userIdObj
-        },
-        {
-          $set: {
-            completed,
-            status: completed ? "completed" : "pending",
-            completedAt: completed ? new Date() : null
-          }
-        }
-      );
-      console.log(
-        "Update result with ObjectId - matched:",
-        result.matchedCount,
-        "modified:",
-        result.modifiedCount
-      );
     }
 
-    console.log("=== END TASK UPDATE ===\n");
+    // Check if user created the task
+    if (!hasPermission && taskAny.createdBy) {
+      const createdById = taskAny.createdBy instanceof ObjectId 
+        ? taskAny.createdBy.toString() 
+        : taskAny.createdBy.toString();
+      if (createdById === userId) {
+        hasPermission = true;
+      }
+    }
 
-    if (result.matchedCount === 0) {
-      return NextResponse.json(
-        {error: "Task not found or unauthorized"},
-        {status: 404}
-      );
+    // If task is unassigned, allow employees to update
+    if (!hasPermission && !taskAny.assignedTo && (!taskAny.assignees || taskAny.assignees.length === 0)) {
+      hasPermission = true;
+    }
+
+    if (!hasPermission) {
+      return NextResponse.json({ error: "You can only update tasks assigned to you or tasks you created" }, { status: 403 });
+    }
+
+    // Employees can update task fields (title, description, priority, dates, etc.)
+    if (body.title !== undefined) {
+      task.title = body.title;
+    }
+    if (body.description !== undefined) {
+      task.description = body.description;
+    }
+    if (body.priority !== undefined) {
+      task.priority = body.priority;
+    }
+    if (body.dueDate !== undefined) {
+      task.dueDate = body.dueDate ? new Date(body.dueDate) : undefined;
+    }
+    if (body.dueTime !== undefined) {
+      task.dueTime = body.dueTime || undefined;
+    }
+    if (body.deadlineDate !== undefined) {
+      task.deadlineDate = body.deadlineDate ? new Date(body.deadlineDate) : undefined;
+    }
+    if (body.deadlineTime !== undefined) {
+      task.deadlineTime = body.deadlineTime || undefined;
+    }
+    if (body.taskKind !== undefined) {
+      task.taskKind = body.taskKind;
+      // Clear customRecurrence if taskKind is not custom
+      if (body.taskKind !== "custom") {
+        task.customRecurrence = undefined;
+        task.markModified("customRecurrence");
+      }
+    }
+    if (body.customRecurrence !== undefined) {
+      const taskKind = body.taskKind !== undefined ? body.taskKind : task.taskKind;
+      if (taskKind === "custom" && body.customRecurrence) {
+        task.customRecurrence = {
+          type: body.customRecurrence.type || "daysOfWeek",
+          daysOfWeek: body.customRecurrence.daysOfWeek || [],
+          daysOfMonth: body.customRecurrence.daysOfMonth || [],
+          recurring: body.customRecurrence.recurring || false,
+        };
+        task.markModified("customRecurrence");
+      } else {
+        task.customRecurrence = undefined;
+        task.markModified("customRecurrence");
+      }
+    }
+    if (body.status !== undefined) {
+      const wasCompleted = task.status === "completed";
+      task.status = body.status;
+      
+      // Handle completion
+      if (body.status === "completed") {
+        // Always update tickedAt when task is marked as completed
+        // This ensures we capture the latest tick time even if task was previously completed
+        const tickedTime = new Date();
+        task.tickedAt = tickedTime;
+        task.markModified("tickedAt"); // Explicitly mark as modified to ensure save
+        
+        // Reset approval status when employee ticks task (needs re-approval)
+        task.approvalStatus = "pending";
+        task.approvedBy = undefined;
+        task.approvedAt = undefined;
+        
+        if (!wasCompleted) {
+          // Only update completedAt and completedBy if transitioning from incomplete to complete
+          task.completedAt = new Date();
+          task.completedBy = new ObjectId(session.user.id);
+        }
+        // If already completed, we still update tickedAt above to reflect latest tick time
+      } else if (body.status !== "completed" && wasCompleted) {
+        task.completedAt = undefined;
+        task.completedBy = undefined;
+        task.tickedAt = undefined; // Clear ticked time if unchecked
+        task.markModified("tickedAt"); // Mark as modified when clearing
+        // Clear custom field values when task is unchecked
+        task.customFieldValues = undefined;
+      }
+    }
+
+    // Handle custom field values (only when completing task)
+    if (body.customFieldValues !== undefined && body.status === "completed") {
+      const taskAny = task as any;
+      // Validate that custom fields exist and values match types
+      if (taskAny.customFields && Array.isArray(taskAny.customFields) && taskAny.customFields.length > 0) {
+        const validatedValues: Record<string, any> = {};
+        
+        for (const field of taskAny.customFields) {
+          const value = body.customFieldValues[field.name];
+          if (value !== undefined && value !== null && value !== "") {
+            // Type validation and conversion
+            switch (field.type) {
+              case "number":
+                validatedValues[field.name] = Number(value);
+                break;
+              case "boolean":
+                validatedValues[field.name] = Boolean(value);
+                break;
+              case "date":
+                validatedValues[field.name] = new Date(value);
+                break;
+              case "string":
+              default:
+                validatedValues[field.name] = String(value);
+                break;
+            }
+          }
+        }
+        
+        task.customFieldValues = Object.keys(validatedValues).length > 0 ? validatedValues : undefined;
+      }
+    }
+
+    // Ensure tickedAt is saved properly
+    const savedTask = await task.save();
+    
+    // Log for debugging
+    console.log(`[Task Update] Task ${taskId} - Status: ${savedTask.status}, TickedAt: ${savedTask.tickedAt}, CompletedAt: ${savedTask.completedAt}`);
+
+    // Manually populate user references
+    const client = await clientPromise;
+    const db = client.db("worknest");
+    const usersCollection = db.collection("users");
+
+    let populatedAssignedTo = null;
+    let populatedCreatedBy = null;
+    let populatedCompletedBy = null;
+
+    // Populate assignedTo
+    if (taskAny.assignedTo) {
+      try {
+        const user = await usersCollection.findOne(
+          { _id: taskAny.assignedTo instanceof ObjectId ? taskAny.assignedTo : new ObjectId(taskAny.assignedTo) },
+          { projection: { name: 1, email: 1 } }
+        );
+        if (user) {
+          populatedAssignedTo = {
+            _id: user._id.toString(),
+            name: user.name,
+            email: user.email,
+          };
+        }
+      } catch (e) {
+        // Ignore errors
+      }
+    }
+
+    // Populate createdBy
+    if (taskAny.createdBy) {
+      try {
+        const user = await usersCollection.findOne(
+          { _id: taskAny.createdBy instanceof ObjectId ? taskAny.createdBy : new ObjectId(taskAny.createdBy) },
+          { projection: { name: 1, email: 1 } }
+        );
+        if (user) {
+          populatedCreatedBy = {
+            _id: user._id.toString(),
+            name: user.name,
+            email: user.email,
+          };
+        }
+      } catch (e) {
+        // Ignore errors
+      }
+    }
+
+    // Populate completedBy
+    if (taskAny.completedBy) {
+      try {
+        const user = await usersCollection.findOne(
+          { _id: taskAny.completedBy instanceof ObjectId ? taskAny.completedBy : new ObjectId(taskAny.completedBy) },
+          { projection: { name: 1, email: 1 } }
+        );
+        if (user) {
+          populatedCompletedBy = {
+            _id: user._id.toString(),
+            name: user.name,
+            email: user.email,
+          };
+        }
+      } catch (e) {
+        // Ignore errors
+      }
     }
 
     return NextResponse.json({
-      message: "Task updated successfully"
+      success: true,
+      task: {
+        ...task.toObject(),
+        _id: task._id.toString(),
+        projectId: task.projectId.toString(),
+        assignedTo: populatedAssignedTo,
+        createdBy: populatedCreatedBy,
+        completedBy: populatedCompletedBy,
+      },
     });
   } catch (error) {
     console.error("Error updating task:", error);
-    return NextResponse.json({error: "Failed to update task"}, {status: 500});
+    const errorMessage = error instanceof Error ? error.message : "Internal server error";
+    console.error("Error details:", errorMessage);
+    return NextResponse.json({ 
+      error: "Internal server error", 
+      details: process.env.NODE_ENV === 'development' ? errorMessage : undefined 
+    }, { status: 500 });
   }
 }

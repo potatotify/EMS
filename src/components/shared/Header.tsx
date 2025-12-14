@@ -1,7 +1,7 @@
 "use client";
 
 import {signOut} from "next-auth/react";
-import {LogOut, Bell, Search, Menu, X} from "lucide-react";
+import {LogOut, Search, Menu, X} from "lucide-react";
 import {useState, useEffect} from "react";
 import {motion, AnimatePresence} from "framer-motion";
 
@@ -44,16 +44,18 @@ export default function Header({title, userName, rightActions, overviewStats}: H
     }
   }, [showDropdown]);
 
+  // Notifications removed as requested
+
   const handleSignOut = async () => {
     await signOut({callbackUrl: "/", redirect: true});
   };
 
   return (
     <header
-      className={`sticky top-0 z-50 transition-all duration-300 ${
+      className={`sticky top-0 z-50 transition-all duration-500 ${
         isScrolled
-          ? "bg-white/80 backdrop-blur-xl shadow-sm border-b border-neutral-200/50"
-          : "bg-white/95 backdrop-blur-sm border-b border-neutral-100"
+          ? "bg-white/90 backdrop-blur-2xl shadow-lg border-b border-neutral-200/60 shadow-neutral-900/5"
+          : "bg-white/95 backdrop-blur-xl border-b border-neutral-100/80"
       }`}
     >
       <div className="max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-8">
@@ -66,13 +68,14 @@ export default function Header({title, userName, rightActions, overviewStats}: H
           >
             <div className="flex items-center gap-3 min-w-0">
               <motion.div
-                whileHover={{scale: 1.05, rotate: 5}}
+                whileHover={{scale: 1.08, rotate: [0, -5, 5, -5, 0]}}
                 whileTap={{scale: 0.95}}
-                className="h-10 w-10 lg:h-12 lg:w-12 rounded-xl bg-gradient-to-br from-emerald-500 via-emerald-600 to-teal-600 flex items-center justify-center text-white font-bold text-sm lg:text-base shadow-lg shadow-emerald-500/20 relative overflow-hidden group shrink-0"
+                className="h-10 w-10 lg:h-12 lg:w-12 rounded-xl bg-gradient-to-br from-emerald-500 via-emerald-600 to-teal-600 flex items-center justify-center text-white font-bold text-sm lg:text-base shadow-xl shadow-emerald-500/30 relative overflow-hidden group shrink-0 ring-2 ring-white/50"
               >
-                <span className="relative z-10">WN</span>
-                <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent" />
-                <div className="absolute inset-0 bg-white/0 group-hover:bg-white/10 transition-colors duration-300" />
+                <span className="relative z-10 drop-shadow-sm">WN</span>
+                <div className="absolute inset-0 bg-gradient-to-br from-white/30 via-white/10 to-transparent" />
+                <div className="absolute inset-0 bg-white/0 group-hover:bg-white/20 transition-all duration-500" />
+                <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/0 to-white/20 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
               </motion.div>
               <div className="min-w-0 hidden sm:block">
                 <h1 className="text-base lg:text-lg font-bold text-neutral-900 truncate">
@@ -124,14 +127,16 @@ export default function Header({title, userName, rightActions, overviewStats}: H
 
             {/* User Avatar & Dropdown */}
             <div className="relative user-menu">
-              <motion.button
-                whileHover={{scale: 1.05}}
+                <motion.button
+                whileHover={{scale: 1.08}}
                 whileTap={{scale: 0.95}}
                 onClick={() => setShowDropdown(!showDropdown)}
-                className="h-10 w-10 lg:h-11 lg:w-11 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white font-semibold text-sm shadow-md hover:shadow-lg transition-all duration-200 ring-2 ring-white/50 focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+                className="h-10 w-10 lg:h-11 lg:w-11 rounded-xl bg-gradient-to-br from-emerald-500 via-emerald-600 to-teal-600 flex items-center justify-center text-white font-bold text-sm shadow-lg shadow-emerald-500/30 hover:shadow-xl hover:shadow-emerald-500/40 transition-all duration-300 ring-2 ring-white/60 focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 relative overflow-hidden group/avatar"
                 aria-label="User menu"
               >
-                {userName.charAt(0).toUpperCase()}
+                <span className="relative z-10 drop-shadow-sm">{userName.charAt(0).toUpperCase()}</span>
+                <div className="absolute inset-0 bg-gradient-to-br from-white/30 via-white/10 to-transparent" />
+                <div className="absolute inset-0 bg-white/0 group-hover/avatar:bg-white/20 transition-all duration-500" />
               </motion.button>
 
               {/* Dropdown Menu */}
@@ -146,8 +151,8 @@ export default function Header({title, userName, rightActions, overviewStats}: H
                       initial={{opacity: 0, scale: 0.95, y: -10}}
                       animate={{opacity: 1, scale: 1, y: 0}}
                       exit={{opacity: 0, scale: 0.95, y: -10}}
-                      transition={{duration: 0.15}}
-                      className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-2xl border border-neutral-200/50 overflow-hidden z-50"
+                      transition={{duration: 0.2, ease: [0.4, 0, 0.2, 1]}}
+                      className="absolute right-0 mt-2 w-56 bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-neutral-200/60 overflow-hidden z-50 ring-1 ring-neutral-900/5"
                     >
                       <div className="p-4 border-b border-neutral-100">
                         <p className="text-sm font-semibold text-neutral-900 truncate">

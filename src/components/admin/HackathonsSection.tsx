@@ -30,10 +30,14 @@ interface Hackathon {
   registrationDeadline: string;
   maxParticipants?: number;
   prizePool?: number;
+  prizePoints?: number;
+  prizeCurrency?: number;
   status: 'upcoming' | 'active' | 'completed' | 'cancelled';
   rules: string[];
   tags: string[];
   participantsCount?: number;
+  winnerId?: string;
+  winnerDeclaredAt?: string;
 }
 
 interface Submission {
@@ -71,6 +75,8 @@ export default function HackathonsSection() {
   const [viewingSubmissions, setViewingSubmissions] = useState<string | null>(null);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [loadingSubmissions, setLoadingSubmissions] = useState(false);
+  const [declaringWinner, setDeclaringWinner] = useState<string | null>(null);
+  const [selectedWinner, setSelectedWinner] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     name: '',
     description: '',
@@ -79,6 +85,8 @@ export default function HackathonsSection() {
     registrationDeadline: '',
     maxParticipants: '',
     prizePool: '',
+    prizePoints: '',
+    prizeCurrency: '',
     rules: '',
     tags: '',
     status: 'upcoming' as 'upcoming' | 'active' | 'completed' | 'cancelled'
@@ -112,6 +120,8 @@ export default function HackathonsSection() {
       registrationDeadline: '',
       maxParticipants: '',
       prizePool: '',
+      prizePoints: '',
+      prizeCurrency: '',
       rules: '',
       tags: '',
       status: 'upcoming'
@@ -129,6 +139,8 @@ export default function HackathonsSection() {
       registrationDeadline: new Date(hackathon.registrationDeadline).toISOString().split('T')[0],
       maxParticipants: hackathon.maxParticipants?.toString() || '',
       prizePool: hackathon.prizePool?.toString() || '',
+      prizePoints: hackathon.prizePoints?.toString() || '',
+      prizeCurrency: hackathon.prizeCurrency?.toString() || '',
       rules: hackathon.rules.join('\n'),
       tags: hackathon.tags.join(', '),
       status: hackathon.status
@@ -147,6 +159,8 @@ export default function HackathonsSection() {
         ...formData,
         maxParticipants: formData.maxParticipants ? parseInt(formData.maxParticipants) : undefined,
         prizePool: formData.prizePool ? parseFloat(formData.prizePool) : undefined,
+        prizePoints: formData.prizePoints ? parseInt(formData.prizePoints) : undefined,
+        prizeCurrency: formData.prizeCurrency ? parseFloat(formData.prizeCurrency) : undefined,
         rules,
         tags
       };
@@ -213,6 +227,47 @@ export default function HackathonsSection() {
       alert('Failed to fetch submissions');
     } finally {
       setLoadingSubmissions(false);
+    }
+  };
+
+  const handleDeclareWinner = async (hackathonId: string) => {
+    setDeclaringWinner(hackathonId);
+    setSelectedWinner(null);
+    // Fetch submissions if not already loaded
+    if (viewingSubmissions !== hackathonId) {
+      await handleViewSubmissions(hackathonId);
+    }
+  };
+
+  const handleConfirmWinner = async () => {
+    if (!declaringWinner || !selectedWinner) {
+      alert('Please select a winner');
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/admin/hackathons/${declaringWinner}/declare-winner`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ winnerId: selectedWinner })
+      });
+
+      const data = await response.json();
+      if (response.ok) {
+        alert('Winner declared successfully!');
+        setDeclaringWinner(null);
+        setSelectedWinner(null);
+        fetchHackathons();
+        // Refresh submissions if viewing
+        if (viewingSubmissions === declaringWinner) {
+          handleViewSubmissions(declaringWinner);
+        }
+      } else {
+        alert(data.error || 'Failed to declare winner');
+      }
+    } catch (error) {
+      console.error('Error declaring winner:', error);
+      alert('Failed to declare winner');
     }
   };
 
@@ -314,6 +369,21 @@ export default function HackathonsSection() {
                         >
                           <Eye className="w-4 h-4" />
                         </button>
+                        {!hackathon.winnerId && (hackathon.status === 'active' || hackathon.status === 'completed') && (
+                          <button
+                            onClick={() => handleDeclareWinner(hackathon._id)}
+                            className="p-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition-colors"
+                            title="Declare Winner"
+                          >
+                            <Trophy className="w-4 h-4" />
+                          </button>
+                        )}
+                        {hackathon.winnerId && (
+                          <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded text-xs font-medium flex items-center gap-1">
+                            <Trophy className="w-3 h-3" />
+                            Winner
+                          </span>
+                        )}
                         <button
                           onClick={() => handleEdit(hackathon)}
                           className="p-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
@@ -441,7 +511,29 @@ export default function HackathonsSection() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Prize Pool (₹) (Optional)
+                    Prize Points (Optional)
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.prizePoints}
+                    onChange={(e) => setFormData({...formData, prizePoints: e.target.value})}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Prize Currency (₹) (Optional)
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.prizeCurrency}
+                    onChange={(e) => setFormData({...formData, prizeCurrency: e.target.value})}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Prize Pool (₹) (Legacy - Optional)
                   </label>
                   <input
                     type="number"
@@ -669,6 +761,116 @@ export default function HackathonsSection() {
                   ))}
                 </div>
               )}
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Declare Winner Modal */}
+      {declaringWinner && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <motion.div
+            initial={{opacity: 0, scale: 0.95}}
+            animate={{opacity: 1, scale: 1}}
+            className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+          >
+            <div className="bg-gradient-to-r from-yellow-500 to-orange-500 px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Trophy className="w-6 h-6 text-white" />
+                <h3 className="text-xl font-bold text-white">
+                  Declare Hackathon Winner
+                </h3>
+              </div>
+              <button
+                onClick={() => {
+                  setDeclaringWinner(null);
+                  setSelectedWinner(null);
+                }}
+                className="text-white hover:text-gray-200 transition-colors"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6">
+              {loadingSubmissions ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="text-gray-500">Loading submissions...</div>
+                </div>
+              ) : submissions.length === 0 ? (
+                <div className="text-center py-12">
+                  <Trophy className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                  <p className="text-lg font-medium text-gray-900 mb-2">No submissions yet</p>
+                  <p className="text-gray-500">Submissions are required before declaring a winner</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <p className="text-sm text-gray-600 mb-4">
+                    Select the winning submission. The hackathon will be marked as completed and the prize pool will be awarded to the winner.
+                  </p>
+                  {submissions.map((submission) => (
+                    <div
+                      key={submission._id}
+                      onClick={() => setSelectedWinner(submission.userId)}
+                      className={`bg-gray-50 rounded-xl p-4 border-2 cursor-pointer transition-all ${
+                        selectedWinner === submission.userId
+                          ? 'border-yellow-500 bg-yellow-50'
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-3 mb-2">
+                            <h4 className="text-lg font-bold text-gray-900">
+                              {submission.submission?.projectName || 'Untitled Project'}
+                            </h4>
+                            {submission.isEmployee && (
+                              <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs font-medium">
+                                Employee {submission.employeeId && `(${submission.employeeId})`}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-sm text-gray-600 space-y-1">
+                            <p><span className="font-medium">Participant:</span> {submission.userName}</p>
+                            <p><span className="font-medium">Email:</span> {submission.userEmail}</p>
+                            {submission.submittedAt && (
+                              <p><span className="font-medium">Submitted:</span> {new Date(submission.submittedAt).toLocaleString()}</p>
+                            )}
+                          </div>
+                          {submission.submission && (
+                            <p className="text-sm text-gray-600 mt-2 line-clamp-2">
+                              {submission.submission.description}
+                            </p>
+                          )}
+                        </div>
+                        {selectedWinner === submission.userId && (
+                          <CheckCircle className="w-6 h-6 text-yellow-600 flex-shrink-0" />
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="border-t px-6 py-4 flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  setDeclaringWinner(null);
+                  setSelectedWinner(null);
+                }}
+                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmWinner}
+                disabled={!selectedWinner || loadingSubmissions}
+                className="px-4 py-2 bg-gradient-to-r from-yellow-500 to-orange-500 text-white rounded-lg font-medium hover:from-yellow-600 hover:to-orange-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                <Trophy className="w-4 h-4" />
+                Declare Winner
+              </button>
             </div>
           </motion.div>
         </div>

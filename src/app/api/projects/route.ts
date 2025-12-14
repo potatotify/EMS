@@ -34,21 +34,16 @@ export async function GET(request: NextRequest) {
         .limit(100)
         .toArray();
     } else if (session.user.role === "employee") {
-      // Employee sees projects assigned to them (as lead, VA incharge, or update incharge)
-      const user = await db.collection("users").findOne({
-        _id: new ObjectId(session.user.id)
-      });
-      const userName = user?.name || "";
+      // Employee sees projects assigned to them (as lead, VA incharge, or in assignees array)
+      const userId = new ObjectId(session.user.id);
       
       projects = await db
         .collection("projects")
         .find({
           $or: [
-            {leadAssignee: new ObjectId(session.user.id)},
-            {vaIncharge: new ObjectId(session.user.id)},
-            {updateIncharge: new ObjectId(session.user.id)},
-            // Legacy support: also check by name (for old data)
-            {updateIncharge: userName}
+            {leadAssignee: userId},
+            {vaIncharge: userId},
+            {assignees: userId} // Check if user is in assignees array
           ]
         })
         .sort({createdAt: -1})
@@ -90,9 +85,13 @@ export async function GET(request: NextRequest) {
         if (project.vaIncharge) {
           project.vaIncharge = await populateEmployee(project.vaIncharge) || project.vaIncharge;
         }
-        // Populate Update Incharge
-        if (project.updateIncharge) {
-          project.updateIncharge = await populateEmployee(project.updateIncharge) || project.updateIncharge;
+        // Populate Assignees array
+        if (project.assignees && Array.isArray(project.assignees)) {
+          project.assignees = await Promise.all(
+            project.assignees.map(async (assigneeId: any) => {
+              return await populateEmployee(assigneeId) || assigneeId;
+            })
+          );
         }
         return project;
       })

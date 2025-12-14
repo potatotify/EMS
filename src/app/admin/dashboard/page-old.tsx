@@ -29,7 +29,6 @@ import ProjectDetailsModal from "@/components/admin/ProjectDetailsModal";
 import EmployeeList from "@/components/admin/EmployeeList";
 import EmployeeDetailModal from "@/components/admin/EmployeeDetailModal";
 import DailyUpdatesReview from "@/components/admin/DailyUpdatesReview";
-import BonusLeaderboard from "@/components/admin/BonusLeaderboard";
 import AdminMessagesPanel from "@/components/admin/AdminMessagesPanel";
 
 interface PendingEmployee {
@@ -324,14 +323,6 @@ export default function AdminDashboard() {
           <DailyUpdatesReview />
         </CollapsibleSection>
 
-        {/* Bonus Leaderboard Section */}
-        <CollapsibleSection
-          title="Bonus Leaderboard"
-          icon={<Trophy className="w-6 h-6 text-white" />}
-          defaultOpen={false}
-        >
-          <BonusLeaderboard />
-        </CollapsibleSection>
 
         {/* Admin Messages Section */}
         <CollapsibleSection

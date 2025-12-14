@@ -6,13 +6,13 @@ import {useEffect, useState} from "react";
 import {
   FolderKanban,
   Clock,
-  TrendingUp,
-  AlertCircle,
-  Mail,
   CheckCircle,
+  Award,
+  Shield,
+  ChevronLeft,
+  ChevronRight,
   UserCheck,
-  Lightbulb,
-  Award
+  Mail
 } from "lucide-react";
 import {motion} from "framer-motion";
 
@@ -21,11 +21,10 @@ import StatCard from "@/components/shared/StatCard";
 import LoadingSpinner from "@/components/shared/LoadingSpinner";
 
 import ProjectProgressCard from "@/components/employee/ProjectProgressCard";
-import DailyUpdateModal from "@/components/employee/DailyUpdateModal";
-import DailyUpdateForm from "@/components/employee/DailyUpdateForm";
 import AttendanceModal from "@/components/employee/AttendanceForm";
-import EmployeeTasksSection from "@/components/employee/EmployeeTasksSection";
-import EmployeeBonusFine from "@/components/employee/EmployeeBonusFine";
+import EmployeeBonusPointsSheet from "@/components/employee/EmployeeBonusPointsSheet";
+import AdminFeatures from "@/components/employee/AdminFeatures";
+import DailyUpdateModal from "@/components/employee/DailyUpdateModal";
 
 interface Project {
   _id: string;
@@ -40,7 +39,7 @@ interface Project {
   whatsappGroupLink?: string;
 }
 
-type SectionType = "projects" | "daily-update" | "tasks" | "bonus-fine" | "tips";
+type SectionType = "projects" | "all-tasks" | "bonus-fine" | "permissions";
 
 interface SidebarItem {
   id: SectionType;
@@ -59,6 +58,25 @@ export default function EmployeeDashboard() {
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
   const [activeSection, setActiveSection] = useState<SectionType>("projects");
+  
+  // Sidebar collapse state with localStorage persistence
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("employee-sidebar-collapsed");
+      return saved === "true";
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("employee-sidebar-collapsed", String(isSidebarCollapsed));
+    }
+  }, [isSidebarCollapsed]);
+
+  const toggleSidebar = () => {
+    setIsSidebarCollapsed(!isSidebarCollapsed);
+  };
 
   useEffect(() => {
     if (status === "authenticated") {
@@ -71,6 +89,12 @@ export default function EmployeeDashboard() {
       }
     }
   }, [status, session, router]);
+
+  useEffect(() => {
+    if (activeSection === "all-tasks") {
+      router.push("/employee/all-tasks");
+    }
+  }, [activeSection, router]);
 
   const fetchUnreadMessages = async () => {
     try {
@@ -148,13 +172,8 @@ export default function EmployeeDashboard() {
       icon: <FolderKanban className="w-5 h-5" />
     },
     {
-      id: "daily-update",
-      title: "Daily Update",
-      icon: <TrendingUp className="w-5 h-5" />
-    },
-    {
-      id: "tasks",
-      title: "My Tasks",
+      id: "all-tasks",
+      title: "All Tasks",
       icon: <CheckCircle className="w-5 h-5" />
     },
     {
@@ -163,9 +182,9 @@ export default function EmployeeDashboard() {
       icon: <Award className="w-5 h-5" />
     },
     {
-      id: "tips",
-      title: "Tips & Guidelines",
-      icon: <Lightbulb className="w-5 h-5" />
+      id: "permissions",
+      title: "My Permissions",
+      icon: <Shield className="w-5 h-5" />
     }
   ];
 
@@ -199,55 +218,12 @@ export default function EmployeeDashboard() {
             )}
           </div>
         );
-      case "daily-update":
-        return <DailyUpdateForm />;
-      case "tasks":
-        return <EmployeeTasksSection />;
+      case "all-tasks":
+        return null; // Navigation handled by useEffect
       case "bonus-fine":
-        return <EmployeeBonusFine />;
-      case "tips":
-        return (
-          <div className="space-y-4">
-            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-6 border border-blue-100">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                <AlertCircle className="w-5 h-5 text-blue-600" />
-                Daily Update Guidelines
-              </h3>
-              <ul className="text-sm text-gray-700 space-y-3">
-                <li className="flex items-start gap-3">
-                  <span className="text-blue-600 font-bold mt-0.5">•</span>
-                  <span>
-                    <strong>Submit on time:</strong> Submit your daily updates before end of day to ensure proper tracking
-                  </span>
-                </li>
-                <li className="flex items-start gap-3">
-                  <span className="text-blue-600 font-bold mt-0.5">•</span>
-                  <span>
-                    <strong>Be specific:</strong> Provide detailed information about tasks completed, including specific features or fixes
-                  </span>
-                </li>
-                <li className="flex items-start gap-3">
-                  <span className="text-blue-600 font-bold mt-0.5">•</span>
-                  <span>
-                    <strong>Report blockers:</strong> Immediately report any challenges or blockers that prevent you from completing tasks
-                  </span>
-                </li>
-                <li className="flex items-start gap-3">
-                  <span className="text-blue-600 font-bold mt-0.5">•</span>
-                  <span>
-                    <strong>Accurate progress:</strong> Update progress percentage accurately based on actual work completed
-                  </span>
-                </li>
-                <li className="flex items-start gap-3">
-                  <span className="text-blue-600 font-bold mt-0.5">•</span>
-                  <span>
-                    <strong>Project updates:</strong> Only lead assignees can submit daily project updates. Other team members can submit general daily updates.
-                  </span>
-                </li>
-              </ul>
-            </div>
-          </div>
-        );
+        return <EmployeeBonusPointsSheet />;
+      case "permissions":
+        return <AdminFeatures />;
       default:
         return null;
     }
@@ -266,26 +242,6 @@ export default function EmployeeDashboard() {
       <Header
         title="Employee Dashboard"
         userName={session?.user?.name || ""}
-        overviewStats={[
-          {
-            label: "Projects",
-            value: projects.length,
-            icon: <FolderKanban className="w-4 h-4" />,
-            color: "from-emerald-500 to-teal-500"
-          },
-          {
-            label: "In Progress",
-            value: inProgressProjects.length,
-            icon: <Clock className="w-4 h-4" />,
-            color: "from-blue-500 to-cyan-500"
-          },
-          {
-            label: "Messages",
-            value: unreadMessages,
-            icon: <Mail className="w-4 h-4" />,
-            color: "from-amber-500 to-orange-500"
-          }
-        ]}
         rightActions={
           <div className="flex items-center gap-2">
             <motion.button
@@ -322,45 +278,100 @@ export default function EmployeeDashboard() {
       />
 
       <div className="flex h-[calc(100vh-5rem)]">
-        {/* Left Sidebar */}
-        <aside className="w-64 lg:w-72 bg-white border-r border-neutral-200 flex flex-col shadow-sm">
+        {/* Left Sidebar - Collapsible */}
+        <motion.aside
+          initial={false}
+          animate={{
+            width: isSidebarCollapsed ? "80px" : "256px",
+          }}
+          transition={{
+            duration: 0.3,
+            ease: [0.4, 0, 0.2, 1],
+          }}
+          className="bg-white border-r border-neutral-200 flex flex-col shadow-sm relative"
+        >
+          {/* Toggle Button */}
+          <motion.button
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.9 }}
+            onClick={toggleSidebar}
+            className="absolute -right-3 top-6 z-20 w-6 h-6 rounded-full bg-white border-2 border-neutral-200 shadow-md flex items-center justify-center text-neutral-600 hover:text-emerald-600 hover:border-emerald-300 transition-colors"
+            aria-label={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {isSidebarCollapsed ? (
+              <ChevronRight className="w-4 h-4" />
+            ) : (
+              <ChevronLeft className="w-4 h-4" />
+            )}
+          </motion.button>
+
           <nav className="flex-1 overflow-y-auto p-4">
-            <h3 className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-4 px-3">
+            <motion.h3
+              initial={false}
+              animate={{
+                opacity: isSidebarCollapsed ? 0 : 1,
+                height: isSidebarCollapsed ? 0 : "auto",
+              }}
+              transition={{ duration: 0.2 }}
+              className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-4 px-3 overflow-hidden"
+            >
               Navigation
-            </h3>
+            </motion.h3>
             <div className="space-y-1">
               {sidebarItems.map((item) => (
                 <motion.button
                   key={item.id}
-                  whileHover={{scale: 1.01, x: 4}}
-                  whileTap={{scale: 0.99}}
+                  whileHover={{ scale: 1.01, x: isSidebarCollapsed ? 0 : 4 }}
+                  whileTap={{ scale: 0.99 }}
                   onClick={() => setActiveSection(item.id)}
                   className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all duration-200 relative group ${
                     activeSection === item.id
                       ? "bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md shadow-emerald-500/20"
                       : "text-neutral-700 hover:bg-neutral-100"
-                  }`}
+                  } ${isSidebarCollapsed ? "justify-center" : ""}`}
+                  title={isSidebarCollapsed ? item.title : undefined}
                 >
-                  <div className={`transition-transform ${activeSection === item.id ? "scale-110" : "group-hover:scale-105"}`}>
+                  <motion.div
+                    animate={{
+                      scale: activeSection === item.id ? 1.1 : 1,
+                    }}
+                    className="flex-shrink-0"
+                  >
                     {item.icon}
-                  </div>
-                  <span className="flex-1 font-medium text-sm">{item.title}</span>
+                  </motion.div>
+                  <motion.span
+                    initial={false}
+                    animate={{
+                      opacity: isSidebarCollapsed ? 0 : 1,
+                      width: isSidebarCollapsed ? 0 : "auto",
+                    }}
+                    transition={{ duration: 0.2 }}
+                    className="flex-1 font-medium text-sm overflow-hidden whitespace-nowrap"
+                  >
+                    {item.title}
+                  </motion.span>
                   {item.badge && (
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-xs font-bold ${
+                    <motion.span
+                      initial={false}
+                      animate={{
+                        opacity: isSidebarCollapsed ? 0 : 1,
+                        scale: isSidebarCollapsed ? 0 : 1,
+                      }}
+                      transition={{ duration: 0.2 }}
+                      className={`px-2 py-0.5 rounded-full text-xs font-bold flex-shrink-0 ${
                         activeSection === item.id
                           ? "bg-white/20 text-white"
                           : "bg-amber-500 text-white"
                       }`}
                     >
                       {item.badge}
-                    </span>
+                    </motion.span>
                   )}
                 </motion.button>
               ))}
             </div>
           </nav>
-        </aside>
+        </motion.aside>
 
         {/* Main Content Area */}
         <main className="flex-1 overflow-y-auto bg-neutral-50/50">

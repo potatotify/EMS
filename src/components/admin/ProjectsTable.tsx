@@ -1,8 +1,9 @@
 "use client";
 
 import {useState, useEffect, Fragment} from "react";
-import {Eye, Calendar, Tag, Users, Search, RefreshCw, TrendingUp} from "lucide-react";
+import {Eye, Calendar, Tag, Users, Search, RefreshCw, TrendingUp, Plus} from "lucide-react";
 import {motion} from "framer-motion";
+import CreateProjectModal from "./CreateProjectModal";
 
 interface Project {
   _id: string;
@@ -15,7 +16,7 @@ interface Project {
   tags: string[];
   leadAssignee?: any;
   vaIncharge?: any;
-  updateIncharge?: any;
+  assignees?: any[];
   startDate?: string;
   budget?: string;
   clientProgress?: number;
@@ -50,6 +51,7 @@ export default function ProjectsTable({
   const [projectUpdates, setProjectUpdates] = useState<Record<string, ProjectUpdate[]>>({});
   const [loadingUpdates, setLoadingUpdates] = useState<Set<string>>(new Set());
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
+  const [showCreateModal, setShowCreateModal] = useState(false);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -154,15 +156,26 @@ export default function ProjectsTable({
             className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white/80 backdrop-blur-sm text-gray-900 placeholder-gray-500"
           />
         </div>
-        <motion.button
-          whileHover={{scale: 1.05}}
-          whileTap={{scale: 0.95}}
-          onClick={onRefresh}
-          className="inline-flex items-center gap-2 px-4 py-2 gradient-emerald text-white rounded-xl text-sm font-semibold transition-all shadow-md hover:shadow-lg"
-        >
-          <RefreshCw className="w-4 h-4" />
-          Refresh
-        </motion.button>
+        <div className="flex gap-2">
+          <motion.button
+            whileHover={{scale: 1.05}}
+            whileTap={{scale: 0.95}}
+            onClick={() => setShowCreateModal(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-semibold transition-all shadow-md hover:shadow-lg"
+          >
+            <Plus className="w-4 h-4" />
+            Create Project
+          </motion.button>
+          <motion.button
+            whileHover={{scale: 1.05}}
+            whileTap={{scale: 0.95}}
+            onClick={onRefresh}
+            className="inline-flex items-center gap-2 px-4 py-2 gradient-emerald text-white rounded-xl text-sm font-semibold transition-all shadow-md hover:shadow-lg"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Refresh
+          </motion.button>
+        </div>
       </div>
 
       {/* Table */}
@@ -193,7 +206,7 @@ export default function ProjectsTable({
                   VA Incharge
                 </th>
                 <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider">
-                  Update Incharge
+                  Assignees
                 </th>
                 <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider">
                   Progress
@@ -301,17 +314,17 @@ export default function ProjectsTable({
                           )}
                         </td>
                         <td className="px-6 py-4">
-                          {project.updateIncharge?.name || (typeof project.updateIncharge === 'string' && project.updateIncharge) ? (
+                          {project.assignees && Array.isArray(project.assignees) && project.assignees.length > 0 ? (
                             <div className="flex items-center gap-2">
                               <div className="w-6 h-6 rounded-full bg-purple-100 flex items-center justify-center">
                                 <Users className="w-3 h-3 text-purple-600" />
                               </div>
                               <span className="text-sm text-neutral-700 truncate max-w-[120px] font-medium">
-                                {project.updateIncharge?.name || project.updateIncharge}
+                                {project.assignees.length} {project.assignees.length === 1 ? 'assignee' : 'assignees'}
                               </span>
                             </div>
                           ) : (
-                            <span className="text-sm text-neutral-400">Not assigned</span>
+                            <span className="text-sm text-neutral-400">No assignees</span>
                           )}
                         </td>
                         <td className="px-6 py-4">
@@ -462,6 +475,17 @@ export default function ProjectsTable({
           </table>
         </div>
       </div>
+
+      {/* Create Project Modal */}
+      {showCreateModal && (
+        <CreateProjectModal
+          onClose={() => setShowCreateModal(false)}
+          onSuccess={() => {
+            setShowCreateModal(false);
+            onRefresh();
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import {useState, useEffect} from "react";
-import {CheckCircle, Calendar, AlertCircle, ListTodo} from "lucide-react";
+import {CheckCircle, Calendar, AlertCircle, ListTodo, ClipboardList} from "lucide-react";
 
 interface Task {
   _id: string;
@@ -18,13 +18,33 @@ interface Task {
   completedAt: string | null;
 }
 
+interface ChecklistItem {
+  label: string;
+  checked: boolean;
+  type: 'global' | 'skill' | 'custom';
+}
+
+interface DailyUpdate {
+  _id: string;
+  date: string;
+  status: 'pending' | 'submitted' | 'reviewed' | 'approved';
+  checklist: ChecklistItem[];
+  tasksForTheDay: string;
+  hoursWorked: number;
+  additionalNotes: string;
+}
+
 export default function EmployeeTasksSection() {
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [dailyUpdate, setDailyUpdate] = useState<DailyUpdate | null>(null);
+  const [checklistConfig, setChecklistConfig] = useState<ChecklistItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [updatingTaskId, setUpdatingTaskId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchTasks();
+    fetchDailyUpdate();
+    fetchChecklistConfig();
   }, []);
 
   const fetchTasks = async () => {
@@ -41,6 +61,35 @@ export default function EmployeeTasksSection() {
     }
   };
 
+  const fetchDailyUpdate = async () => {
+    try {
+      const response = await fetch("/api/daily-updates");
+      const data = await response.json();
+      if (response.ok) {
+        const today = new Date().toISOString().split("T")[0];
+        const todaysUpdate = data.find((update: DailyUpdate) => {
+          const updateDate = new Date(update.date).toISOString().split("T")[0];
+          return updateDate === today;
+        });
+        setDailyUpdate(todaysUpdate || null);
+      }
+    } catch (error) {
+      console.error("Error fetching daily update:", error);
+    }
+  };
+
+  const fetchChecklistConfig = async () => {
+    try {
+      const response = await fetch("/api/employee/checklist-config");
+      const data = await response.json();
+      if (response.ok) {
+        setChecklistConfig(data.checklist || []);
+      }
+    } catch (error) {
+      console.error("Error fetching checklist config:", error);
+    }
+  };
+
   const handleToggleTask = async (
     taskId: string,
     currentCompleted: boolean
@@ -54,7 +103,7 @@ export default function EmployeeTasksSection() {
       });
 
       if (response.ok) {
-        await fetchTasks(); // Refresh the task list
+        await fetchTasks();
       } else {
         alert("Failed to update task");
       }
@@ -63,6 +112,32 @@ export default function EmployeeTasksSection() {
       alert("Failed to update task");
     } finally {
       setUpdatingTaskId(null);
+    }
+  };
+
+  const handleToggleChecklistItem = async (index: number) => {
+    if (!dailyUpdate) return;
+
+    const updatedChecklist = [...dailyUpdate.checklist];
+    updatedChecklist[index].checked = !updatedChecklist[index].checked;
+
+    try {
+      const response = await fetch("/api/daily-updates", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          checklist: updatedChecklist,
+          tasksForTheDay: dailyUpdate.tasksForTheDay,
+          hoursWorked: dailyUpdate.hoursWorked,
+          additionalNotes: dailyUpdate.additionalNotes
+        })
+      });
+
+      if (response.ok) {
+        await fetchDailyUpdate();
+      }
+    } catch (error) {
+      console.error("Error updating checklist:", error);
     }
   };
 
@@ -88,6 +163,10 @@ export default function EmployeeTasksSection() {
 
   const pendingTasks = tasks.filter((t) => !t.completed);
   const completedTasks = tasks.filter((t) => t.completed);
+  
+  const dailyUpdateChecklist = dailyUpdate?.checklist || checklistConfig.map(item => ({...item, checked: false}));
+  const pendingChecklistCount = dailyUpdateChecklist.filter(item => !item.checked).length;
+  const hasSubmittedToday = dailyUpdate?.status === 'submitted' || dailyUpdate?.status === 'reviewed' || dailyUpdate?.status === 'approved';
 
   if (loading) {
     return (
@@ -121,6 +200,49 @@ export default function EmployeeTasksSection() {
         </div>
       ) : (
         <div className="space-y-4">
+          {/* Daily Updates Section */}
+          {dailyUpdateChecklist.length > 0 && (
+            <div>
+              <h3 className="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wide flex items-center gap-2">
+                <ClipboardList className="w-4 h-4" />
+                Daily Updates
+                <span className="text-xs px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full font-medium normal-case">
+                  {pendingChecklistCount} pending
+                </span>
+              </h3>
+              <div className="space-y-2 mb-6">
+                {dailyUpdateChecklist.map((item, index) => (
+                  <label
+                    key={index}
+                    className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all ${
+                      item.checked
+                        ? "border-gray-200 bg-gray-50"
+                        : "border-purple-200 bg-white hover:bg-purple-50/30"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={item.checked}
+                      onChange={() => handleToggleChecklistItem(index)}
+                      disabled={!dailyUpdate}
+                      className="w-4 h-4 mt-0.5 text-purple-600 rounded border-purple-300 focus:ring-purple-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    />
+                    <div className="flex-1">
+                      <span className={`text-sm ${
+                        item.checked ? "text-gray-500 line-through" : "text-gray-900"
+                      }`}>
+                        {item.label}
+                      </span>
+                      <span className="text-xs text-gray-500 ml-2">
+                        ({item.type})
+                      </span>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Pending Tasks */}
           {pendingTasks.length > 0 && (
             <div>

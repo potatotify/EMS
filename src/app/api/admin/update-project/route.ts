@@ -26,6 +26,27 @@ export async function POST(request: NextRequest) {
     if (data.status) updateData.status = data.status;
     if (data.priority) updateData.priority = data.priority;
     if (data.clientProgress !== undefined) updateData.clientProgress = data.clientProgress;
+    
+    // Handle client update
+    if (data.clientId !== undefined) {
+      if (data.clientId === 'none' || data.clientId === '') {
+        // Remove client assignment
+        updateData.clientId = null;
+        updateData.clientName = null;
+      } else {
+        // Update client assignment
+        const clientUser = await db.collection('users').findOne({
+          _id: new ObjectId(data.clientId),
+          role: 'client'
+        });
+        
+        if (clientUser) {
+          updateData.clientId = new ObjectId(data.clientId);
+          updateData.clientName = clientUser.name;
+        }
+      }
+    }
+    
     if (data.leadAssignee) updateData.leadAssignee = new ObjectId(data.leadAssignee);
     if (data.vaIncharge !== undefined) updateData.vaIncharge = data.vaIncharge;
     if (data.freelancer !== undefined) updateData.freelancer = data.freelancer;

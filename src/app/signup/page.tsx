@@ -16,8 +16,8 @@ function SignupContent() {
   const {data: session, status} = useSession();
   const router = useRouter();
 
-  const [activeRole, setActiveRole] = useState<"employee" | "client" | "hackathon">(
-    roleParam === "hackathon" ? "hackathon" : roleParam === "client" ? "client" : "employee"
+  const [activeRole, setActiveRole] = useState<"employee" | "hackathon">(
+    roleParam === "hackathon" ? "hackathon" : "employee"
   );
   const [isLoading, setIsLoading] = useState(false);
 
@@ -31,13 +31,6 @@ function SignupContent() {
       icon: UserCircle,
       gradient: "from-emerald-500 to-teal-600",
       description: "Access projects, submit updates, and track progress"
-    },
-    {
-      id: "client",
-      label: "Client",
-      icon: Briefcase,
-      gradient: "from-blue-500 to-cyan-600",
-      description: "Monitor timelines, milestones, and real-time updates"
     },
     {
       id: "hackathon",

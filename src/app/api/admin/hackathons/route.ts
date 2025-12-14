@@ -38,7 +38,9 @@ export async function GET(request: NextRequest) {
           status: hackathon.status,
           rules: hackathon.rules || [],
           tags: hackathon.tags || [],
-          participantsCount: participantCount
+          participantsCount: participantCount,
+          winnerId: hackathon.winnerId?.toString(),
+          winnerDeclaredAt: hackathon.winnerDeclaredAt
         };
       })
     );

@@ -1,11 +1,13 @@
 import NextAuth, {NextAuthOptions} from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
+import CredentialsProvider from "next-auth/providers/credentials";
 import {MongoDBAdapter} from "@auth/mongodb-adapter";
 import {Adapter} from "next-auth/adapters";
 import clientPromise from "@/lib/mongodb";
 import {cookies} from "next/headers";
+import bcrypt from "bcryptjs";
 
-const ADMIN_EMAILS = ["chiragkhati04@gmail.com", "zprootech@gmail.com","insightfusionanalytics@gmail.com","khativijaya@gmail.com","soorajrajeevoff@gmail.com"];
+const ADMIN_EMAILS = ["chiragkhati04@gmail.com","zprootech@gmail.com","insightfusionanalytics@gmail.com","piyush31221@gmail.com"];
 
 const createCustomAdapter = () => {
   const adapter = MongoDBAdapter(clientPromise);
@@ -51,6 +53,47 @@ const createCustomAdapter = () => {
 export const authOptions: NextAuthOptions = {
   adapter: createCustomAdapter() as Adapter,
   providers: [
+    // Credentials provider for clients only
+    CredentialsProvider({
+      id: 'client-credentials',
+      name: 'Client Login',
+      credentials: {
+        email: { label: "Email", type: "email" },
+        password: { label: "Password", type: "password" }
+      },
+      async authorize(credentials) {
+        if (!credentials?.email || !credentials?.password) {
+          return null;
+        }
+
+        const client = await clientPromise;
+        const db = client.db("worknest");
+
+        const user = await db.collection("users").findOne({
+          email: credentials.email.toLowerCase(),
+          role: 'client'
+        });
+
+        if (!user || !user.password) {
+          return null;
+        }
+
+        const isValidPassword = await bcrypt.compare(credentials.password, user.password);
+
+        if (!isValidPassword) {
+          return null;
+        }
+
+        return {
+          id: user._id.toString(),
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          isApproved: user.isApproved,
+          profileCompleted: user.profileCompleted
+        };
+      }
+    }),
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID!,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!
@@ -59,6 +102,12 @@ export const authOptions: NextAuthOptions = {
   callbacks: {
     async signIn({user, account, profile}) {
       try {
+        // For credentials (client login), user is already validated
+        if (account?.provider === 'client-credentials') {
+          return true;
+        }
+
+        // For Google login (admin, employee, hackathon)
         const client = await clientPromise;
         const db = client.db("worknest");
 
@@ -86,9 +135,19 @@ export const authOptions: NextAuthOptions = {
         return false;
       }
     },
-    async jwt({token, user, trigger}) {
+    async jwt({token, user, trigger, account}) {
       // On initial sign in or when manually updating
       if (user || trigger === "update") {
+        // For credentials login, user object already has the data
+        if (account?.provider === 'client-credentials' && user) {
+          token.id = user.id;
+          token.role = (user as any).role;
+          token.isApproved = (user as any).isApproved;
+          token.profileCompleted = (user as any).profileCompleted;
+          return token;
+        }
+
+        // For Google login, fetch from database
         const client = await clientPromise;
         const db = client.db("worknest");
 
