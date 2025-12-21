@@ -1002,6 +1002,7 @@ export default function ProjectTaskList() {
                           getPriorityColor={getPriorityColor}
                           formatDate={formatDate}
                           isOverdue={isOverdue(task)}
+                          isAdmin={isAdmin}
                         />
                       </div>
                     ))}
@@ -1117,6 +1118,7 @@ export default function ProjectTaskList() {
                         getPriorityColor={getPriorityColor}
                         formatDate={formatDate}
                         isOverdue={isOverdue(task)}
+                        isAdmin={isAdmin}
                       />
                     ))}
 
@@ -1402,6 +1404,7 @@ function TaskItem({
   getPriorityColor,
   formatDate,
   isOverdue,
+  isAdmin,
 }: {
   task: Task;
   employees: Employee[];
@@ -1415,6 +1418,7 @@ function TaskItem({
   getPriorityColor: (priority: number) => string;
   formatDate: (date?: string) => string;
   isOverdue: boolean;
+  isAdmin: boolean;
 }) {
   // Set default assigned date and time if not already set
   const getDefaultAssignedDate = () => {
