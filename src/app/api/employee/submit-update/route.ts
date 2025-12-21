@@ -26,15 +26,27 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 });
     }
 
-    // Verify user is the lead assignee
+    // Verify user is a lead assignee (support both single and array)
     const userId = new ObjectId(session.user.id);
-    const leadAssigneeId = project.leadAssignee 
-      ? (typeof project.leadAssignee === 'string' 
+    let isLeadAssignee = false;
+    
+    if (project.leadAssignee) {
+      if (Array.isArray(project.leadAssignee)) {
+        // Check if user is in the array of lead assignees
+        isLeadAssignee = project.leadAssignee.some((lead: any) => {
+          const leadId = typeof lead === 'string' ? new ObjectId(lead) : new ObjectId(lead);
+          return leadId.equals(userId);
+        });
+      } else {
+        // Single lead assignee (legacy)
+        const leadAssigneeId = typeof project.leadAssignee === 'string' 
           ? new ObjectId(project.leadAssignee) 
-          : new ObjectId(project.leadAssignee))
-      : null;
+          : new ObjectId(project.leadAssignee);
+        isLeadAssignee = leadAssigneeId.equals(userId);
+      }
+    }
 
-    if (!leadAssigneeId || !leadAssigneeId.equals(userId)) {
+    if (!isLeadAssignee) {
       return NextResponse.json({ 
         error: 'Only the lead assignee can submit daily project updates' 
       }, { status: 403 });

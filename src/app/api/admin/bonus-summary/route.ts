@@ -441,7 +441,14 @@ export async function GET(request: NextRequest) {
       const lead = project.leadAssignee;
       if (!lead) continue;
 
-      const employeeId = lead.toString();
+      // Handle both array and single leadAssignee
+      const leadAssigneeIds: string[] = [];
+      if (Array.isArray(lead)) {
+        leadAssigneeIds.push(...lead.map((l: any) => l.toString()));
+      } else {
+        leadAssigneeIds.push(lead.toString());
+      }
+
       const bonus =
         typeof project.bonusPoints === "number" ? project.bonusPoints : 0;
       const bonusCurrency =
@@ -455,43 +462,46 @@ export async function GET(request: NextRequest) {
       if (!baseDate) continue;
       const dateKey = toDateKey(baseDate);
 
-      const row = getOrCreateRow(employeeId, dateKey);
+      // Attribute project rewards/fines to all lead assignees
+      for (const employeeId of leadAssigneeIds) {
+        const row = getOrCreateRow(employeeId, dateKey);
 
-      row.projectRewardTotal += bonus;
-      row.projectRewardTotalCurrency += bonusCurrency;
+        row.projectRewardTotal += bonus;
+        row.projectRewardTotalCurrency += bonusCurrency;
 
-      // New logic:
-      // - If project is completed, employee gets the bonus (reward)
-      // - If project is NOT completed AND deadline has passed, employee gets fined
-      // - No fine before deadline
-      const status = project.status || "in_progress";
-      const now = new Date();
-      
-      // Check if deadline has passed
-      let deadlinePassed = false;
-      if (project.deadline) {
-        const deadline = new Date(project.deadline);
-        deadlinePassed = now > deadline;
-      } else if (project.dueDate) {
-        const dueDate = new Date(project.dueDate);
-        deadlinePassed = now > dueDate;
-      }
+        // New logic:
+        // - If project is completed, employee gets the bonus (reward)
+        // - If project is NOT completed AND deadline has passed, employee gets fined
+        // - No fine before deadline
+        const status = project.status || "in_progress";
+        const now = new Date();
+        
+        // Check if deadline has passed
+        let deadlinePassed = false;
+        if (project.deadline) {
+          const deadline = new Date(project.deadline);
+          deadlinePassed = now > deadline;
+        } else if (project.dueDate) {
+          const dueDate = new Date(project.dueDate);
+          deadlinePassed = now > dueDate;
+        }
 
-      // Grant reward if project is completed
-      if (status === "completed" && bonus > 0) {
-        row.projectEarned += bonus;
-      }
-      // Apply fine only if deadline passed and project not completed
-      else if (status !== "completed" && deadlinePassed && penalty > 0) {
-        row.projectFine += penalty;
-      }
-      
-      if (status === "completed" && bonusCurrency > 0) {
-        row.projectEarnedCurrency += bonusCurrency;
-      }
-      // Apply currency fine only if deadline passed and project not completed
-      else if (status !== "completed" && deadlinePassed && penaltyCurrency > 0) {
-        row.projectFineCurrency += penaltyCurrency;
+        // Grant reward if project is completed
+        if (status === "completed" && bonus > 0) {
+          row.projectEarned += bonus;
+        }
+        // Apply fine only if deadline passed and project not completed
+        else if (status !== "completed" && deadlinePassed && penalty > 0) {
+          row.projectFine += penalty;
+        }
+        
+        if (status === "completed" && bonusCurrency > 0) {
+          row.projectEarnedCurrency += bonusCurrency;
+        }
+        // Apply currency fine only if deadline passed and project not completed
+        else if (status !== "completed" && deadlinePassed && penaltyCurrency > 0) {
+          row.projectFineCurrency += penaltyCurrency;
+        }
       }
     }
 

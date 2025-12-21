@@ -47,6 +47,7 @@ import TaskAnalysisSheet from "@/components/admin/TaskAnalysisSheet";
 import BonusPointsSheet from "@/components/admin/BonusPointsSheet";
 import ClientsTable from "@/components/admin/ClientsTable";
 import EmployeeProjectsTable from "@/components/admin/EmployeeProjectsTable";
+import ProjectDailyUpdatesTable from "@/components/admin/ProjectDailyUpdatesTable";
 
 interface PendingEmployee {
   _id: string;
@@ -70,6 +71,7 @@ interface Project {
 
 type SectionType =
   | "projects"
+  | "project-daily-updates"
   | "daily-updates"
   | "pending-approvals"
   | "employees"
@@ -203,6 +205,11 @@ export default function AdminDashboard() {
       icon: <FolderKanban className="w-5 h-5" />
     },
     {
+      id: "project-daily-updates",
+      title: "Project Daily Updates",
+      icon: <Calendar className="w-5 h-5" />
+    },
+    {
       id: "project-tasks",
       title: "Project Tasks",
       icon: <CheckSquare className="w-5 h-5" />
@@ -278,6 +285,8 @@ export default function AdminDashboard() {
             onRefresh={fetchProjects}
           />
         );
+      case "project-daily-updates":
+        return <ProjectDailyUpdatesTable />;
       case "daily-updates":
         return <DailyUpdatesReview />;
       case "pending-approvals":
@@ -462,7 +471,7 @@ export default function AdminDashboard() {
         <main className="flex-1 overflow-y-auto bg-neutral-50/50">
           <div className={`${activeSection === "project-tasks" ? "w-full p-0" : "max-w-[1920px] mx-auto p-6 lg:p-8"}`}>
             {/* Section Header - Hidden for project-tasks */}
-            {activeSection !== "project-tasks" && activeSection !== "bonus-summary" && activeSection !== "daily-updates" && activeSection !== "task-analysis" && activeSection !== "hackathons" && activeSection !== "checklist-settings" && activeSection !== "employee-permissions" && activeSection !== "clients" && activeSection !== "employee-projects" && (
+            {activeSection !== "project-tasks" && activeSection !== "bonus-summary" && activeSection !== "daily-updates" && activeSection !== "project-daily-updates" && activeSection !== "task-analysis" && activeSection !== "hackathons" && activeSection !== "checklist-settings" && activeSection !== "employee-permissions" && activeSection !== "clients" && activeSection !== "employee-projects" && (
               <motion.div
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}

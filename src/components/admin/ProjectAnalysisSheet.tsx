@@ -162,7 +162,15 @@ export default function ProjectAnalysisSheet() {
       p.totalUpdates || 0,
       p.totalHours || 0,
       p.budget || "N/A",
-      p.leadAssignee?.name || "Unassigned",
+      (() => {
+        const leadAssignee = p.leadAssignee;
+        if (!leadAssignee) return "Unassigned";
+        if (Array.isArray(leadAssignee)) {
+          if (leadAssignee.length === 0) return "Unassigned";
+          return leadAssignee.map((lead: any) => lead?.name || 'Unknown').join(', ');
+        }
+        return leadAssignee.name || "Unassigned";
+      })(),
       p.vaIncharge?.name || "N/A",
       p.updateIncharge?.name || "N/A",
       p.tags?.join(", ") || ""
@@ -421,7 +429,15 @@ export default function ProjectAnalysisSheet() {
                       <td className="px-4 py-3 text-sm text-neutral-900 font-medium">{project.totalHours || 0}</td>
                       <td className="px-4 py-3 text-sm text-neutral-600">{project.budget || "N/A"}</td>
                       <td className="px-4 py-3 text-sm text-neutral-600">
-                        {project.leadAssignee?.name || "Unassigned"}
+                        {(() => {
+                          const leadAssignee = project.leadAssignee;
+                          if (!leadAssignee) return "Unassigned";
+                          if (Array.isArray(leadAssignee)) {
+                            if (leadAssignee.length === 0) return "Unassigned";
+                            return leadAssignee.map((lead: any) => lead?.name || 'Unknown').join(', ');
+                          }
+                          return leadAssignee.name || "Unassigned";
+                        })()}
                       </td>
                       <td className="px-4 py-3 text-sm text-neutral-600">
                         {project.vaIncharge?.name || "N/A"}

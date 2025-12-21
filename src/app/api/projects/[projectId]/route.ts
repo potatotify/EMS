@@ -53,15 +53,31 @@ export async function GET(
       return null;
     };
 
-    // Populate lead assignee details if exists
+    // Populate lead assignee details if exists (can be single or array)
     if (project.leadAssignee) {
-      project.leadAssignee = await populateEmployee(project.leadAssignee) || project.leadAssignee;
-      if (typeof project.leadAssignee === 'object' && project.leadAssignee._id) {
-        project.leadAssigneeDetails = {
-          _id: project.leadAssignee._id,
-          name: project.leadAssignee.name,
-          email: project.leadAssignee.email,
-        };
+      if (Array.isArray(project.leadAssignee)) {
+        // Multiple lead assignees
+        project.leadAssignee = await Promise.all(
+          project.leadAssignee.map(async (leadId: any) => {
+            return await populateEmployee(leadId) || leadId;
+          })
+        );
+        // Create leadAssigneeDetails array for backward compatibility
+        project.leadAssigneeDetails = project.leadAssignee.filter((lead: any) => lead && lead._id).map((lead: any) => ({
+          _id: lead._id,
+          name: lead.name,
+          email: lead.email,
+        }));
+      } else {
+        // Single lead assignee (legacy support)
+        project.leadAssignee = await populateEmployee(project.leadAssignee) || project.leadAssignee;
+        if (typeof project.leadAssignee === 'object' && project.leadAssignee._id) {
+          project.leadAssigneeDetails = {
+            _id: project.leadAssignee._id,
+            name: project.leadAssignee.name,
+            email: project.leadAssignee.email,
+          };
+        }
       }
     }
 

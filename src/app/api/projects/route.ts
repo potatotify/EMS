@@ -41,7 +41,8 @@ export async function GET(request: NextRequest) {
         .collection("projects")
         .find({
           $or: [
-            {leadAssignee: userId},
+            {leadAssignee: userId}, // Single lead assignee (legacy)
+            {leadAssignee: {$in: [userId]}}, // Multiple lead assignees (array)
             {vaIncharge: userId},
             {assignees: userId} // Check if user is in assignees array
           ]
@@ -77,9 +78,19 @@ export async function GET(request: NextRequest) {
     // Populate employee details for all projects
     const populatedProjects = await Promise.all(
       (projects || []).map(async (project) => {
-        // Populate lead assignee
+        // Populate lead assignee (can be single or array)
         if (project.leadAssignee) {
-          project.leadAssignee = await populateEmployee(project.leadAssignee) || project.leadAssignee;
+          if (Array.isArray(project.leadAssignee)) {
+            // Multiple lead assignees
+            project.leadAssignee = await Promise.all(
+              project.leadAssignee.map(async (leadId: any) => {
+                return await populateEmployee(leadId) || leadId;
+              })
+            );
+          } else {
+            // Single lead assignee (legacy support)
+            project.leadAssignee = await populateEmployee(project.leadAssignee) || project.leadAssignee;
+          }
         }
         // Populate VA Incharge
         if (project.vaIncharge) {
@@ -97,7 +108,13 @@ export async function GET(request: NextRequest) {
       })
     );
 
-    return NextResponse.json({projects: populatedProjects});
+    return NextResponse.json({projects: populatedProjects}, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+      }
+    });
   } catch (error) {
     console.error("Error fetching projects:", error);
     return NextResponse.json({error: "Internal server error"}, {status: 500});

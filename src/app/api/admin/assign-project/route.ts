@@ -21,13 +21,18 @@ export async function POST(request: NextRequest) {
     const assignees = Array.isArray(data.assignees) 
       ? data.assignees.map((id: string) => new ObjectId(id))
       : [];
+    
+    // Convert leadAssignees array to ObjectIds
+    const leadAssignees = Array.isArray(data.leadAssignees)
+      ? data.leadAssignees.map((id: string) => new ObjectId(id))
+      : [];
 
     // Update project with assignments
     const result = await db.collection('projects').updateOne(
       { _id: new ObjectId(data.projectId) },
       {
         $set: {
-          leadAssignee: data.leadAssignee ? new ObjectId(data.leadAssignee) : null,
+          leadAssignee: leadAssignees, // Store as array
           vaIncharge: data.vaIncharge ? new ObjectId(data.vaIncharge) : null,
           freelancer: data.freelancer || null,
           assignees: assignees, // New assignees field (array of ObjectIds)

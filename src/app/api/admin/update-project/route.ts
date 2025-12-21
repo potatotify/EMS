@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
       }
     }
     
-    if (data.leadAssignee) updateData.leadAssignee = new ObjectId(data.leadAssignee);
+    // Note: leadAssignee should be updated via /api/admin/assign-project endpoint
     if (data.vaIncharge !== undefined) updateData.vaIncharge = data.vaIncharge;
     if (data.freelancer !== undefined) updateData.freelancer = data.freelancer;
     if (data.updateIncharge !== undefined) updateData.updateIncharge = data.updateIncharge;

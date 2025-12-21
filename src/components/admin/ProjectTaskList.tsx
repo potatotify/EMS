@@ -93,7 +93,7 @@ interface Project {
   _id: string;
   projectName: string;
   clientName: string;
-  leadAssignee?: any; // Can be ObjectId or populated object
+  leadAssignee?: any | any[]; // Can be ObjectId, populated object, or array of both
   vaIncharge?: any; // Can be ObjectId or populated object
   updateIncharge?: any; // Can be ObjectId or populated object
   assignees?: any[]; // Array of assignees
@@ -133,6 +133,49 @@ export default function ProjectTaskList() {
   // Subtask modal state
   const [showSubtaskModal, setShowSubtaskModal] = useState(false);
   const [selectedTaskForSubtasks, setSelectedTaskForSubtasks] = useState<Task | null>(null);
+  const [isCurrentUserLeadAssignee, setIsCurrentUserLeadAssignee] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  // Check if current user is admin or lead assignee
+  useEffect(() => {
+    if (session?.user) {
+      const userRole = session.user.role;
+      setIsAdmin(userRole === 'admin');
+    }
+  }, [session]);
+
+  // Check if user is lead assignee for selected project
+  useEffect(() => {
+    if (!selectedProject || !session?.user?.id) {
+      setIsCurrentUserLeadAssignee(false);
+      return;
+    }
+
+    const userId = session.user.id;
+    const leadAssignee = selectedProject.leadAssignee;
+
+    // Check if leadAssignee is an array (multiple lead assignees)
+    if (Array.isArray(leadAssignee)) {
+      const isLead = leadAssignee.some((lead: any) => {
+        if (!lead) return false;
+        if (typeof lead === 'string') return lead === userId;
+        if (lead._id) return lead._id.toString() === userId;
+        return lead.toString() === userId;
+      });
+      setIsCurrentUserLeadAssignee(isLead);
+    } else if (leadAssignee) {
+      // Single lead assignee (legacy support)
+      if (typeof leadAssignee === 'string') {
+        setIsCurrentUserLeadAssignee(leadAssignee === userId);
+      } else if (leadAssignee._id) {
+        setIsCurrentUserLeadAssignee(leadAssignee._id.toString() === userId);
+      } else {
+        setIsCurrentUserLeadAssignee(leadAssignee.toString() === userId);
+      }
+    } else {
+      setIsCurrentUserLeadAssignee(false);
+    }
+  }, [selectedProject, session]);
 
   // Fetch projects
   useEffect(() => {
@@ -198,11 +241,21 @@ export default function ProjectTaskList() {
     };
 
     // Collect all assignee IDs
-    const leadId = getAssigneeId(project.leadAssignee);
+    const leadAssignee = project.leadAssignee;
+    if (Array.isArray(leadAssignee)) {
+      // Multiple lead assignees
+      leadAssignee.forEach((lead: any) => {
+        const leadId = getAssigneeId(lead);
+        if (leadId) assigneeIds.add(leadId);
+      });
+    } else if (leadAssignee) {
+      // Single lead assignee (legacy support)
+      const leadId = getAssigneeId(leadAssignee);
+      if (leadId) assigneeIds.add(leadId);
+    }
     const vaId = getAssigneeId(project.vaIncharge);
     const updateId = getAssigneeId(project.updateIncharge);
 
-    if (leadId) assigneeIds.add(leadId);
     if (vaId) assigneeIds.add(vaId);
     if (updateId) assigneeIds.add(updateId);
 
@@ -1168,7 +1221,7 @@ export default function ProjectTaskList() {
           projectId={selectedProject._id}
           projectEmployees={employees}
           currentUserId={session?.user?.id || ""}
-          isAdmin={true}
+          isAdmin={isAdmin}
           onSubtasksChange={handleSubtasksChange}
         />
       )}
@@ -1873,53 +1926,55 @@ function TaskItem({
                     </div>
                   </div>
 
-                  {/* Bonus/Penalty Points and Currency */}
-                  <div className="space-y-2">
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-xs text-neutral-600 mb-1 block">Bonus Points</label>
-                        <input
-                          type="number"
-                          min="0"
-                          value={formData.bonusPoints || 0}
-                          onChange={(e) => setFormData({ ...formData, bonusPoints: parseInt(e.target.value) || 0 })}
-                          className="w-full bg-white border border-neutral-300 rounded px-2 py-1 text-xs text-neutral-900 focus:outline-none focus:border-emerald-500"
-                        />
+                  {/* Bonus/Penalty Points and Currency - Only for Admin */}
+                  {isAdmin && (
+                    <div className="space-y-2">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-xs text-neutral-600 mb-1 block">Bonus Points</label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={formData.bonusPoints || 0}
+                            onChange={(e) => setFormData({ ...formData, bonusPoints: parseInt(e.target.value) || 0 })}
+                            className="w-full bg-white border border-neutral-300 rounded px-2 py-1 text-xs text-neutral-900 focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-neutral-600 mb-1 block">Bonus Currency (₹)</label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={formData.bonusCurrency || 0}
+                            onChange={(e) => setFormData({ ...formData, bonusCurrency: parseInt(e.target.value) || 0 })}
+                            className="w-full bg-white border border-neutral-300 rounded px-2 py-1 text-xs text-neutral-900 focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
                       </div>
-                      <div>
-                        <label className="text-xs text-neutral-600 mb-1 block">Bonus Currency (₹)</label>
-                        <input
-                          type="number"
-                          min="0"
-                          value={formData.bonusCurrency || 0}
-                          onChange={(e) => setFormData({ ...formData, bonusCurrency: parseInt(e.target.value) || 0 })}
-                          className="w-full bg-white border border-neutral-300 rounded px-2 py-1 text-xs text-neutral-900 focus:outline-none focus:border-emerald-500"
-                        />
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-xs text-neutral-600 mb-1 block">Penalty Points</label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={formData.penaltyPoints || 0}
+                            onChange={(e) => setFormData({ ...formData, penaltyPoints: parseInt(e.target.value) || 0 })}
+                            className="w-full bg-white border border-neutral-300 rounded px-2 py-1 text-xs text-neutral-900 focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-neutral-600 mb-1 block">Penalty Currency (₹)</label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={formData.penaltyCurrency || 0}
+                            onChange={(e) => setFormData({ ...formData, penaltyCurrency: parseInt(e.target.value) || 0 })}
+                            className="w-full bg-white border border-neutral-300 rounded px-2 py-1 text-xs text-neutral-900 focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-xs text-neutral-600 mb-1 block">Penalty Points</label>
-                        <input
-                          type="number"
-                          min="0"
-                          value={formData.penaltyPoints || 0}
-                          onChange={(e) => setFormData({ ...formData, penaltyPoints: parseInt(e.target.value) || 0 })}
-                          className="w-full bg-white border border-neutral-300 rounded px-2 py-1 text-xs text-neutral-900 focus:outline-none focus:border-emerald-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs text-neutral-600 mb-1 block">Penalty Currency (₹)</label>
-                        <input
-                          type="number"
-                          min="0"
-                          value={formData.penaltyCurrency || 0}
-                          onChange={(e) => setFormData({ ...formData, penaltyCurrency: parseInt(e.target.value) || 0 })}
-                          className="w-full bg-white border border-neutral-300 rounded px-2 py-1 text-xs text-neutral-900 focus:outline-none focus:border-emerald-500"
-                        />
-                      </div>
-                    </div>
-                  </div>
+                  )}
 
                   {/* Custom Fields */}
                   <div className="border-t border-neutral-200 pt-2">

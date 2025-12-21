@@ -364,7 +364,10 @@ export async function GET(request: NextRequest) {
     const projects = await db
       .collection("projects")
       .find({
-        leadAssignee: new ObjectId(employeeId),
+        $or: [
+          { leadAssignee: new ObjectId(employeeId) },
+          { leadAssignee: { $in: [new ObjectId(employeeId)] } }
+        ],
         assignedAt: { $gte: startDate, $lte: endDate },
       })
       .toArray();

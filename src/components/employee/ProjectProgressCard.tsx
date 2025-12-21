@@ -29,13 +29,27 @@ export default function ProjectProgressCard({
   const {data: session} = useSession();
   const router = useRouter();
   
-  // Check if current user is the lead assignee
+  // Check if current user is the lead assignee (supports both single and array)
   const userId = (session?.user as any)?.id;
-  const isLeadAssignee = project.leadAssignee && (
-    (typeof project.leadAssignee === 'object' && project.leadAssignee._id === userId) ||
-    (typeof project.leadAssignee === 'string' && project.leadAssignee === userId) ||
-    project.leadAssignee === userId
-  );
+  const isLeadAssignee = (() => {
+    if (!project.leadAssignee) return false;
+    
+    if (Array.isArray(project.leadAssignee)) {
+      // Check if user is in the array of lead assignees
+      return project.leadAssignee.some((lead: any) => {
+        if (typeof lead === 'object' && lead._id) {
+          return lead._id === userId;
+        }
+        return lead === userId;
+      });
+    }
+    
+    // Single lead assignee (legacy)
+    if (typeof project.leadAssignee === 'object' && project.leadAssignee._id) {
+      return project.leadAssignee._id === userId;
+    }
+    return project.leadAssignee === userId;
+  })();
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {

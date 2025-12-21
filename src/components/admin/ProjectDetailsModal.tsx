@@ -409,13 +409,24 @@ export default function ProjectDetailsModal({
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
               {project.leadAssigneeDetails && (
                 <div>
-                  <p className="text-gray-600 font-medium">Lead Assignee</p>
-                  <p className="text-gray-900">
-                    {project.leadAssigneeDetails.name}
-                  </p>
-                  <p className="text-gray-500 text-xs">
-                    {project.leadAssigneeDetails.email}
-                  </p>
+                  <p className="text-gray-600 font-medium">Lead Assignee{Array.isArray(project.leadAssigneeDetails) && project.leadAssigneeDetails.length > 1 ? 's' : ''}</p>
+                  {Array.isArray(project.leadAssigneeDetails) ? (
+                    project.leadAssigneeDetails.map((lead: any, idx: number) => (
+                      <div key={idx} className="mb-2">
+                        <p className="text-gray-900">{lead.name}</p>
+                        <p className="text-gray-500 text-xs">{lead.email}</p>
+                      </div>
+                    ))
+                  ) : (
+                    <>
+                      <p className="text-gray-900">
+                        {project.leadAssigneeDetails.name}
+                      </p>
+                      <p className="text-gray-500 text-xs">
+                        {project.leadAssigneeDetails.email}
+                      </p>
+                    </>
+                  )}
                 </div>
               )}
               {project.vaIncharge && (

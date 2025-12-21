@@ -122,7 +122,14 @@ export default function ProjectListItem({
               <div>
                 <p className="text-xs text-gray-500">Lead</p>
                 <p className="font-medium text-gray-900 truncate">
-                  {project.leadAssignee.name || "Assigned"}
+                  {(() => {
+                    const leadAssignee = project.leadAssignee;
+                    if (Array.isArray(leadAssignee)) {
+                      if (leadAssignee.length === 0) return "Assigned";
+                      return leadAssignee.map(lead => lead?.name || 'Unknown').join(', ');
+                    }
+                    return leadAssignee.name || "Assigned";
+                  })()}
                 </p>
               </div>
             </div>

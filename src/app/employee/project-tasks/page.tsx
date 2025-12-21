@@ -175,10 +175,29 @@ function EmployeeProjectTasksContent() {
         
         // Check if current user is lead assignee
         if (session?.user?.id) {
-          const leadId = typeof data.project.leadAssignee === 'string' 
-            ? data.project.leadAssignee 
-            : data.project.leadAssignee?._id;
-          setIsLeadAssignee(leadId === session.user.id);
+          const userId = session.user.id;
+          const leadAssignee = data.project.leadAssignee;
+          let isLead = false;
+
+          // Check if leadAssignee is an array (multiple lead assignees)
+          if (Array.isArray(leadAssignee)) {
+            isLead = leadAssignee.some((lead: any) => {
+              if (!lead) return false;
+              if (typeof lead === 'string') return lead === userId;
+              if (lead._id) return lead._id.toString() === userId;
+              return lead.toString() === userId;
+            });
+          } else if (leadAssignee) {
+            // Single lead assignee (legacy support)
+            if (typeof leadAssignee === 'string') {
+              isLead = leadAssignee === userId;
+            } else if (leadAssignee._id) {
+              isLead = leadAssignee._id.toString() === userId;
+            } else {
+              isLead = leadAssignee.toString() === userId;
+            }
+          }
+          setIsLeadAssignee(isLead);
         }
       }
     } catch (error) {
@@ -1464,14 +1483,24 @@ function EmployeeTaskForm({
         let isLead = false;
         let leadId: string | undefined;
         if (project.leadAssignee) {
-          if (typeof project.leadAssignee === 'object' && project.leadAssignee._id) {
-            leadId = project.leadAssignee._id.toString();
-          } else if (typeof project.leadAssignee === 'object') {
-            leadId = project.leadAssignee.toString();
+          // Check if leadAssignee is an array (multiple lead assignees)
+          if (Array.isArray(project.leadAssignee)) {
+            isLead = project.leadAssignee.some((lead: any) => {
+              if (!lead) return false;
+              const id = typeof lead === 'object' && lead._id ? lead._id.toString() : (typeof lead === 'string' ? lead : lead.toString());
+              return id === userId;
+            });
           } else {
-            leadId = project.leadAssignee.toString();
+            // Single lead assignee (legacy support)
+            if (typeof project.leadAssignee === 'object' && project.leadAssignee._id) {
+              leadId = project.leadAssignee._id.toString();
+            } else if (typeof project.leadAssignee === 'object') {
+              leadId = project.leadAssignee.toString();
+            } else {
+              leadId = project.leadAssignee.toString();
+            }
+            isLead = leadId === userId;
           }
-          isLead = leadId === userId;
         }
         setIsLeadAssignee(isLead);
 

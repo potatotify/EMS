@@ -1,7 +1,7 @@
 "use client";
 
 import {useState, useEffect, Fragment} from "react";
-import {Eye, Calendar, Tag, Users, Search, RefreshCw, TrendingUp, Plus} from "lucide-react";
+import {Eye, Calendar, Tag, Users, Search, RefreshCw, TrendingUp, Plus, ChevronDown, Check} from "lucide-react";
 import {motion} from "framer-motion";
 import CreateProjectModal from "./CreateProjectModal";
 
@@ -52,15 +52,51 @@ export default function ProjectsTable({
   const [loadingUpdates, setLoadingUpdates] = useState<Set<string>>(new Set());
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [statusDropdownOpen, setStatusDropdownOpen] = useState<string | null>(null);
+  const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
+
+  const statusOptions = [
+    { value: "completed", label: "Completed" },
+    { value: "cancelled", label: "Cancelled" },
+    { value: "client_meeting_done", label: "Client Meeting Done" },
+    { value: "contact_made", label: "Contact Made" },
+    { value: "active", label: "Active" },
+    { value: "recontacted", label: "Recontacted" },
+    { value: "stalled", label: "Stalled" },
+    { value: "requirements_sent", label: "Requirements Sent" },
+    { value: "waiting_for_requirement", label: "Waiting for Requirement" },
+    { value: "awaiting_testimonial", label: "Awaiting Testimonial" },
+    { value: "training", label: "Training" },
+  ];
 
   const getStatusColor = (status: string) => {
     switch (status) {
+      case "completed":
+        return "bg-green-100 text-green-800";
+      case "cancelled":
+        return "bg-red-100 text-red-800";
+      case "client_meeting_done":
+        return "bg-blue-100 text-blue-800";
+      case "contact_made":
+        return "bg-purple-100 text-purple-800";
+      case "active":
+        return "bg-emerald-100 text-emerald-800";
+      case "recontacted":
+        return "bg-indigo-100 text-indigo-800";
+      case "stalled":
+        return "bg-orange-100 text-orange-800";
+      case "requirements_sent":
+        return "bg-cyan-100 text-cyan-800";
+      case "waiting_for_requirement":
+        return "bg-yellow-100 text-yellow-800";
+      case "awaiting_testimonial":
+        return "bg-pink-100 text-pink-800";
+      case "training":
+        return "bg-violet-100 text-violet-800";
       case "pending_assignment":
         return "bg-amber-100 text-amber-800";
       case "in_progress":
         return "bg-yellow-100 text-yellow-800";
-      case "completed":
-        return "bg-green-100 text-green-800";
       case "on_hold":
         return "bg-red-100 text-red-800";
       default:
@@ -81,6 +117,49 @@ export default function ProjectsTable({
         return "text-gray-600";
     }
   };
+
+  const handleStatusUpdate = async (projectId: string, newStatus: string) => {
+    setUpdatingStatus(projectId);
+    try {
+      const response = await fetch("/api/admin/update-project", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId,
+          status: newStatus,
+        }),
+      });
+
+      if (response.ok) {
+        // Refresh the projects list
+        onRefresh();
+        setStatusDropdownOpen(null);
+      } else {
+        const data = await response.json();
+        alert("Failed to update status: " + (data.error || "Unknown error"));
+      }
+    } catch (error) {
+      console.error("Error updating status:", error);
+      alert("Failed to update status");
+    } finally {
+      setUpdatingStatus(null);
+    }
+  };
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (statusDropdownOpen) {
+        const target = event.target as HTMLElement;
+        if (!target.closest('.status-dropdown-container')) {
+          setStatusDropdownOpen(null);
+        }
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [statusDropdownOpen]);
 
   const fetchProjectUpdates = async (projectId: string) => {
     if (projectUpdates[projectId]) return; // Already fetched
@@ -264,14 +343,37 @@ export default function ProjectsTable({
                             {project.clientName}
                           </span>
                         </td>
-                        <td className="px-6 py-4 w-40">
-                          <span
-                            className={`inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap ${getStatusColor(
-                              project.status
-                            )}`}
-                          >
-                            {project.status.replace("_", " ")}
-                          </span>
+                        <td className="px-6 py-4 w-48">
+                          <div className="relative status-dropdown-container">
+                            <button
+                              onClick={() => setStatusDropdownOpen(
+                                statusDropdownOpen === project._id ? null : project._id
+                              )}
+                              disabled={updatingStatus === project._id}
+                              className={`inline-flex items-center justify-between gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap w-full ${getStatusColor(
+                                project.status
+                              )} hover:opacity-80 transition-opacity disabled:opacity-50`}
+                            >
+                              <span>{project.status.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}</span>
+                              <ChevronDown className="w-3 h-3" />
+                            </button>
+                            {statusDropdownOpen === project._id && (
+                              <div className="absolute z-50 mt-1 w-56 bg-white border border-neutral-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">
+                                {statusOptions.map((option) => (
+                                  <button
+                                    key={option.value}
+                                    onClick={() => handleStatusUpdate(project._id, option.value)}
+                                    className="w-full text-left px-3 py-2 text-sm hover:bg-neutral-100 flex items-center justify-between transition-colors"
+                                  >
+                                    <span>{option.label}</span>
+                                    {project.status === option.value && (
+                                      <Check className="w-4 h-4 text-emerald-600" />
+                                    )}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                         </td>
                         <td className="px-6 py-4">
                           <span className={`text-sm font-medium ${getPriorityColor(project.priority)}`}>
@@ -286,18 +388,36 @@ export default function ProjectsTable({
                           </div>
                         </td>
                         <td className="px-6 py-4">
-                          {project.leadAssignee?.name ? (
-                            <div className="flex items-center gap-2">
-                              <div className="w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center">
-                                <Users className="w-3 h-3 text-emerald-600" />
+                          {(() => {
+                            const leadAssignee = project.leadAssignee;
+                            if (!leadAssignee) return <span className="text-sm text-neutral-400">Not assigned</span>;
+                            
+                            if (Array.isArray(leadAssignee)) {
+                              if (leadAssignee.length === 0) return <span className="text-sm text-neutral-400">Not assigned</span>;
+                              const names = leadAssignee.map(lead => lead?.name || 'Unknown').join(', ');
+                              return (
+                                <div className="flex items-center gap-2">
+                                  <div className="w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center">
+                                    <Users className="w-3 h-3 text-emerald-600" />
+                                  </div>
+                                  <span className="text-sm text-neutral-700 truncate max-w-[120px] font-medium" title={names}>
+                                    {names}
+                                  </span>
+                                </div>
+                              );
+                            }
+                            
+                            return (
+                              <div className="flex items-center gap-2">
+                                <div className="w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center">
+                                  <Users className="w-3 h-3 text-emerald-600" />
+                                </div>
+                                <span className="text-sm text-neutral-700 truncate max-w-[120px] font-medium">
+                                  {leadAssignee.name}
+                                </span>
                               </div>
-                              <span className="text-sm text-neutral-700 truncate max-w-[120px] font-medium">
-                                {project.leadAssignee.name}
-                              </span>
-                            </div>
-                          ) : (
-                            <span className="text-sm text-neutral-400">Not assigned</span>
-                          )}
+                            );
+                          })()}
                         </td>
                         <td className="px-6 py-4">
                           {project.vaIncharge?.name || (typeof project.vaIncharge === 'string' && project.vaIncharge) ? (

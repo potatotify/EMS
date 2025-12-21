@@ -186,10 +186,17 @@ export default function UpdateProjectModal({
               }
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
             >
-              <option value="pending_assignment">Pending Assignment</option>
-              <option value="in_progress">In Progress</option>
-              <option value="on_hold">On Hold</option>
               <option value="completed">Completed</option>
+              <option value="cancelled">Cancelled</option>
+              <option value="client_meeting_done">Client Meeting Done</option>
+              <option value="contact_made">Contact Made</option>
+              <option value="active">Active</option>
+              <option value="recontacted">Recontacted</option>
+              <option value="stalled">Stalled</option>
+              <option value="requirements_sent">Requirements Sent</option>
+              <option value="waiting_for_requirement">Waiting for Requirement</option>
+              <option value="awaiting_testimonial">Awaiting Testimonial</option>
+              <option value="training">Training</option>
             </select>
           </div>
 

@@ -96,6 +96,31 @@ export default function EmployeeDashboard() {
     }
   }, [activeSection, router]);
 
+  // Add visibility change listener to refresh data when tab becomes visible
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && status === "authenticated") {
+        fetchProjects();
+        fetchUnreadMessages();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    // Also refresh when window gains focus
+    window.addEventListener('focus', () => {
+      if (status === "authenticated") {
+        fetchProjects();
+        fetchUnreadMessages();
+      }
+    });
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleVisibilityChange);
+    };
+  }, [status]);
+
   const fetchUnreadMessages = async () => {
     try {
       const res = await fetch("/api/employee/messages/unread-count");
