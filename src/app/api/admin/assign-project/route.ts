@@ -27,31 +27,42 @@ export async function POST(request: NextRequest) {
       ? data.leadAssignees.map((id: string) => new ObjectId(id))
       : [];
 
+    // Get current project to check if it has a status
+    const currentProject = await db.collection('projects').findOne({
+      _id: new ObjectId(data.projectId)
+    });
+
+    // Prepare update data
+    const updateData: any = {
+      leadAssignee: leadAssignees, // Store as array
+      vaIncharge: data.vaIncharge ? new ObjectId(data.vaIncharge) : null,
+      freelancer: data.freelancer || null,
+      assignees: assignees, // New assignees field (array of ObjectIds)
+      codersRecommendation: data.codersRecommendation || null,
+      leadership: data.leadership || null,
+      githubLink: data.githubLink || null,
+      loomLink: data.loomLink || null,
+      whatsappGroupLink: data.whatsappGroupLink || null,
+      tags: data.tags || [],
+      priority: data.priority || 'medium',
+      // New: project-level incentive configuration
+      bonusPoints: typeof data.bonusPoints === 'number' ? data.bonusPoints : 50,
+      penaltyPoints: typeof data.penaltyPoints === 'number' ? data.penaltyPoints : 0,
+      assignedAt: new Date(),
+      assignedBy: new ObjectId(session.user.id),
+      updatedAt: new Date(),
+    };
+
+    // Only set status to 'in_progress' if project doesn't have a status yet (first assignment)
+    // Otherwise preserve the existing status
+    if (!currentProject?.status) {
+      updateData.status = 'in_progress';
+    }
+
     // Update project with assignments
     const result = await db.collection('projects').updateOne(
       { _id: new ObjectId(data.projectId) },
-      {
-        $set: {
-          leadAssignee: leadAssignees, // Store as array
-          vaIncharge: data.vaIncharge ? new ObjectId(data.vaIncharge) : null,
-          freelancer: data.freelancer || null,
-          assignees: assignees, // New assignees field (array of ObjectIds)
-          codersRecommendation: data.codersRecommendation || null,
-          leadership: data.leadership || null,
-          githubLink: data.githubLink || null,
-          loomLink: data.loomLink || null,
-          whatsappGroupLink: data.whatsappGroupLink || null,
-          tags: data.tags || [],
-          priority: data.priority || 'medium',
-          // New: project-level incentive configuration
-          bonusPoints: typeof data.bonusPoints === 'number' ? data.bonusPoints : 50,
-          penaltyPoints: typeof data.penaltyPoints === 'number' ? data.penaltyPoints : 0,
-          status: 'in_progress',
-          assignedAt: new Date(),
-          assignedBy: new ObjectId(session.user.id),
-          updatedAt: new Date(),
-        },
-      }
+      { $set: updateData }
     );
 
     if (result.matchedCount === 0) {
