@@ -35,12 +35,13 @@ export async function POST(request: NextRequest) {
         }
 
         const taskAny = task as any;
+        const isNotApplicable = taskAny.notApplicable === true;
 
-        // Calculate if task was completed on time (only for approve)
+        // Calculate if task was completed on time (only for approve and if not marked as NA)
         let shouldGetPenalty = false;
         let shouldGetReward = false;
 
-        if (approve && task.status === "completed") {
+        if (approve && task.status === "completed" && !isNotApplicable) {
           // Check if deadline has passed
           if (taskAny.deadlineDate) {
             const deadlineDate = new Date(taskAny.deadlineDate);
@@ -75,6 +76,12 @@ export async function POST(request: NextRequest) {
           } else if (taskAny.bonusPoints && taskAny.bonusPoints > 0) {
             shouldGetReward = true;
           }
+        }
+
+        // If task is marked as not applicable, don't award any bonus/penalty
+        if (isNotApplicable) {
+          shouldGetPenalty = false;
+          shouldGetReward = false;
         }
 
         // Update approval status

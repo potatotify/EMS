@@ -29,8 +29,11 @@ export async function POST(
       return NextResponse.json({ error: "Task not found" }, { status: 404 });
     }
 
-    const taskAny = task as any;
     const now = new Date();
+
+    // Skip bonus/penalty calculation for tasks marked as not applicable
+    const taskAny = task as any;
+    const isNotApplicable = taskAny.notApplicable === true;
 
     // For employee-created tasks, require bonus/penalty to be set before approval
     if (taskAny.createdByEmployee && approve && task.status === "completed") {
@@ -56,11 +59,11 @@ export async function POST(
       }
     }
 
-    // Calculate if task was completed on time
+    // Calculate if task was completed on time (only if not marked as not applicable)
     let shouldGetPenalty = false;
     let shouldGetReward = false;
 
-    if (approve && task.status === "completed") {
+    if (approve && task.status === "completed" && !isNotApplicable) {
       // Check if deadline has passed
       if (taskAny.deadlineDate) {
         const deadlineDate = new Date(taskAny.deadlineDate);
@@ -115,11 +118,17 @@ export async function POST(
           deadlineDate.setHours(23, 59, 59, 999);
         }
 
-        if (now > deadlineDate && task.status !== "completed") {
-          // Deadline passed and task not completed
+        if (now > deadlineDate && task.status !== "completed" && !isNotApplicable) {
+          // Deadline passed and task not completed (only if not marked as NA)
           shouldGetPenalty = true;
         }
       }
+    }
+
+    // If task is marked as not applicable, don't award any bonus/penalty
+    if (isNotApplicable) {
+      shouldGetPenalty = false;
+      shouldGetReward = false;
     }
 
     // Update approval status

@@ -341,6 +341,12 @@ export async function GET(request: NextRequest) {
       let shouldGetPenalty = false;
       let shouldGetReward = false;
 
+      // Skip tasks marked as not applicable - they don't contribute to bonus/penalty
+      const taskAny = task as any;
+      if (taskAny.notApplicable === true) {
+        continue;
+      }
+
       const approvalStatus: string = task.approvalStatus || "pending";
       const nowLocal = new Date();
 

@@ -20,6 +20,8 @@ export async function PATCH(
 
     const { taskId } = await params;
     const body = await request.json();
+    
+    console.log(`[Task Update] Received request for task ${taskId}, body:`, JSON.stringify(body));
 
     await dbConnect();
 
@@ -153,9 +155,20 @@ export async function PATCH(
       }
     }
 
+    // Handle notApplicable flag (independent of status)
+    if (body.notApplicable !== undefined) {
+      task.notApplicable = body.notApplicable === true;
+      task.markModified("notApplicable");
+      // Reset approval status when NA flag changes (needs re-approval)
+      task.approvalStatus = "pending";
+      task.approvedBy = undefined;
+      task.approvedAt = undefined;
+      console.log(`[Task Update] Task ${taskId} - Setting notApplicable to: ${task.notApplicable}`);
+    }
+
     // Handle custom field values (only when completing task)
     if (body.customFieldValues !== undefined && body.status === "completed") {
-      const taskAny = task as any;
+      // Use existing taskAny from line 32
       // Validate that custom fields exist and values match types
       if (taskAny.customFields && Array.isArray(taskAny.customFields) && taskAny.customFields.length > 0) {
         const validatedValues: Record<string, any> = {};
@@ -190,7 +203,8 @@ export async function PATCH(
     const savedTask = await task.save();
     
     // Log for debugging
-    console.log(`[Task Update] Task ${taskId} - Status: ${savedTask.status}, TickedAt: ${savedTask.tickedAt}, CompletedAt: ${savedTask.completedAt}`);
+    const savedTaskAny = savedTask as any;
+    console.log(`[Task Update] Task ${taskId} - Status: ${savedTask.status}, TickedAt: ${savedTask.tickedAt}, CompletedAt: ${savedTask.completedAt}, NotApplicable: ${savedTaskAny.notApplicable}`);
 
     // Manually populate user references
     const client = await clientPromise;
@@ -258,16 +272,20 @@ export async function PATCH(
       }
     }
 
+    const taskObject = task.toObject();
+    const responseTask = {
+      ...taskObject,
+      _id: task._id.toString(),
+      projectId: task.projectId.toString(),
+      assignedTo: populatedAssignedTo,
+      createdBy: populatedCreatedBy,
+      completedBy: populatedCompletedBy,
+      notApplicable: taskObject.notApplicable || false, // Ensure field is included
+    };
+    
     return NextResponse.json({
       success: true,
-      task: {
-        ...task.toObject(),
-        _id: task._id.toString(),
-        projectId: task.projectId.toString(),
-        assignedTo: populatedAssignedTo,
-        createdBy: populatedCreatedBy,
-        completedBy: populatedCompletedBy,
-      },
+      task: responseTask,
     });
   } catch (error) {
     console.error("Error updating task:", error);

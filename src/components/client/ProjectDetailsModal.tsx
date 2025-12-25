@@ -25,6 +25,9 @@ interface Project {
     name: string;
     email: string;
   };
+  plannedDate?: string;
+  plannedTime?: string;
+  plannedDateTime?: string;
 }
 
 interface Message {
@@ -249,6 +252,27 @@ export default function ProjectDetailsModal({
                   </p>
                   <p className="text-sm text-gray-600">
                     {project.leadAssigneeDetails.email}
+                  </p>
+                </div>
+              )}
+
+              {/* Planned Time */}
+              {project.plannedDate && project.plannedTime && (
+                <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+                  <label className="block text-sm font-medium text-purple-900 mb-2 flex items-center gap-2">
+                    <Clock className="w-4 h-4" />
+                    Planned Time
+                  </label>
+                  <p className="text-purple-700 font-semibold">
+                    {new Date(`${project.plannedDate}T${project.plannedTime}`).toLocaleString("en-US", {
+                      weekday: "long",
+                      year: "numeric",
+                      month: "long",
+                      day: "numeric",
+                      hour: "numeric",
+                      minute: "2-digit",
+                      hour12: true
+                    })}
                   </p>
                 </div>
               )}

@@ -66,6 +66,7 @@ interface Task {
     name: string;
     email: string;
   };
+  tickedAt?: string;
   order: number;
   assigneeNames?: string[]; // For display/grouping
   customFields?: Array<{
@@ -970,7 +971,7 @@ export default function ProjectTaskList() {
               let filtered = filteredTasks(sectionTasks);
               
               return (
-                <div key={section} className="flex-shrink-0 w-72 bg-neutral-50 rounded-lg p-2 border border-neutral-200 overflow-visible">
+                <div key={section} className="shrink-0 w-72 bg-neutral-50 rounded-lg p-2 border border-neutral-200 overflow-visible">
                   {/* Section Header */}
                   <div className="flex items-center justify-between mb-2 group">
                     <h3 className="text-sm font-semibold text-neutral-700">
@@ -988,7 +989,7 @@ export default function ProjectTaskList() {
                   {/* Section Tasks */}
                   <div className="space-y-1 min-h-[150px] overflow-visible">
                     {filtered.map((task) => (
-                      <div key={task._id} className={editingTask?._id === task._id ? "relative z-[9999]" : "relative"}>
+                      <div key={task._id} className={editingTask?._id === task._id ? "relative z-9999" : "relative"}>
                         <TaskItem
                           task={task}
                           employees={employees}
@@ -1020,7 +1021,7 @@ export default function ProjectTaskList() {
             })}
 
             {/* Add Section Button */}
-            <div className="flex-shrink-0">
+            <div className="shrink-0">
               {showSectionInput ? (
                 <div className="w-72 p-2 bg-white rounded-lg border border-neutral-200 shadow-sm">
                   <input
@@ -1460,7 +1461,7 @@ function TaskItem({
       type: "daysOfWeek",
       daysOfWeek: [],
       daysOfMonth: [],
-      recurring: false
+      recurring: true
     },
   });
 
@@ -1648,7 +1649,7 @@ function TaskItem({
             {openMenu === "priority" && (
               <div
                 ref={menuRefs.priority}
-                className="absolute top-full left-0 mt-1 bg-white border border-neutral-200 rounded-lg shadow-xl z-[9999] min-w-[140px]"
+                className="absolute top-full left-0 mt-1 bg-white border border-neutral-200 rounded-lg shadow-xl z-9999 min-w-[140px]"
                 onMouseDown={(e) => e.stopPropagation()}
                 style={{ 
                   maxHeight: '400px', 
@@ -1742,7 +1743,7 @@ function TaskItem({
                 className="absolute top-full left-0 mt-1 bg-white border border-neutral-200 rounded-lg shadow-lg z-50 min-w-[120px]"
                 onMouseDown={(e) => e.stopPropagation()}
               >
-                {(["one-time", "daily", "weekly", "monthly", "recurring", "custom"] as TaskKind[]).map((kind) => (
+                {(["one-time", "daily", "weekly", "monthly", "custom"] as TaskKind[]).map((kind) => (
                   <button
                     key={kind}
                     type="button"
@@ -2129,7 +2130,7 @@ function TaskItem({
                                 const newFields = formData.customFields?.filter((_, i) => i !== index) || [];
                                 setFormData({ ...formData, customFields: newFields });
                               }}
-                              className="p-1 hover:bg-red-50 text-red-500 rounded transition-colors flex-shrink-0"
+                              className="p-1 hover:bg-red-50 text-red-500 rounded transition-colors shrink-0"
                               title="Remove"
                             >
                               <X className="w-3 h-3" />
@@ -2183,7 +2184,7 @@ function TaskItem({
       >
       <button
         onClick={onToggleComplete}
-        className="mt-0.5 flex-shrink-0"
+        className="mt-0.5 shrink-0"
       >
         {task.status === "completed" ? (
           <CheckCircle2 className="w-4 h-4 text-emerald-600" />
@@ -2283,6 +2284,70 @@ function TaskItem({
               <span>{formatDate(task.dueDate)}</span>
             </div>
           )}
+          {task.tickedAt && task.status === "completed" && (
+            (() => {
+              const tickedTime = new Date(task.tickedAt);
+              const deadlineDate = task.deadlineDate ? new Date(task.deadlineDate) : null;
+              const deadlineTime = task.deadlineTime;
+              
+              let deadlineDateTime: Date | null = null;
+              if (deadlineDate) {
+                deadlineDateTime = new Date(deadlineDate);
+                if (deadlineTime) {
+                  const [hours, minutes] = deadlineTime.split(':').map(Number);
+                  deadlineDateTime.setHours(hours, minutes, 0, 0);
+                } else {
+                  deadlineDateTime.setHours(23, 59, 59, 999);
+                }
+              }
+              
+              let timeDiffText = "";
+              let timeDiffColor = "";
+              
+              if (deadlineDateTime) {
+                const diffMs = tickedTime.getTime() - deadlineDateTime.getTime();
+                const diffHours = Math.abs(diffMs) / (1000 * 60 * 60);
+                const diffDays = Math.abs(diffMs) / (1000 * 60 * 60 * 24);
+                
+                if (diffMs < 0) {
+                  // Completed before deadline (early)
+                  if (diffDays >= 1) {
+                    timeDiffText = `${Math.floor(diffDays)}d early`;
+                  } else {
+                    timeDiffText = `${Math.floor(diffHours)}h early`;
+                  }
+                  timeDiffColor = "text-emerald-600";
+                } else {
+                  // Completed after deadline (late)
+                  if (diffDays >= 1) {
+                    timeDiffText = `${Math.floor(diffDays)}d late`;
+                  } else {
+                    timeDiffText = `${Math.floor(diffHours)}h late`;
+                  }
+                  timeDiffColor = "text-red-500";
+                }
+              }
+              
+              const tickedTimeStr = tickedTime.toLocaleString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit',
+                hour12: true
+              });
+              
+              return (
+                <div className={`flex items-center gap-1 ${timeDiffColor || "text-neutral-500"}`}>
+                  <span className="text-[9px]">Ticked: {tickedTimeStr}</span>
+                  {timeDiffText && (
+                    <span className={`text-[9px] font-medium ${timeDiffColor}`}>
+                      ({timeDiffText})
+                    </span>
+                  )}
+                </div>
+              );
+            })()
+          )}
           {(task.bonusPoints || 0) > 0 && (
             <span className="text-emerald-600 font-medium">+{task.bonusPoints}</span>
           )}
@@ -2333,7 +2398,7 @@ function TaskItem({
                       type: "daysOfWeek",
                       daysOfWeek: formData.customRecurrence?.daysOfWeek ?? [],
                       daysOfMonth: [],
-                      recurring: formData.customRecurrence?.recurring ?? false
+                      recurring: true
                     }
                   })}
                   className={`p-4 rounded-lg border-2 transition-all text-left ${
@@ -2353,7 +2418,7 @@ function TaskItem({
                       type: "daysOfMonth",
                       daysOfWeek: [],
                       daysOfMonth: formData.customRecurrence?.daysOfMonth ?? [],
-                      recurring: formData.customRecurrence?.recurring ?? false
+                      recurring: true
                     }
                   })}
                   className={`p-4 rounded-lg border-2 transition-all text-left ${
@@ -2366,33 +2431,6 @@ function TaskItem({
                   <div className="text-xs text-neutral-600 mt-1">Select days (1-31)</div>
                 </button>
               </div>
-            </div>
-
-            {/* Recurring Checkbox */}
-            <div className="flex items-start gap-3 p-4 bg-neutral-50 rounded-lg">
-              <input
-                type="checkbox"
-                id="recurring-checkbox-normal"
-                checked={formData.customRecurrence?.recurring ?? false}
-                onChange={(e) => setFormData({
-                  ...formData,
-                  customRecurrence: {
-                    type: formData.customRecurrence?.type ?? "daysOfWeek",
-                    daysOfWeek: formData.customRecurrence?.daysOfWeek ?? [],
-                    daysOfMonth: formData.customRecurrence?.daysOfMonth ?? [],
-                    recurring: e.target.checked
-                  }
-                })}
-                className="mt-0.5 w-4 h-4 text-emerald-600 border-neutral-300 rounded focus:ring-emerald-500"
-              />
-              <label htmlFor="recurring-checkbox-normal" className="flex-1 cursor-pointer">
-                <div className="font-medium text-neutral-900 text-sm">Recurring</div>
-                <div className="text-xs text-neutral-600 mt-0.5">
-                  {formData.customRecurrence?.type === "daysOfWeek"
-                    ? "Task repeats every week on selected days"
-                    : "Task repeats every month on selected days"}
-                </div>
-              </label>
             </div>
 
             {/* Date/Day Selection */}
@@ -2422,7 +2460,7 @@ function TaskItem({
                               ? days.filter(d => d !== day)
                               : [...days, day].sort((a, b) => a - b),
                             daysOfMonth: formData.customRecurrence?.daysOfMonth ?? [],
-                            recurring: formData.customRecurrence?.recurring ?? false
+                            recurring: true
                           }
                         });
                       }}
@@ -2454,7 +2492,7 @@ function TaskItem({
                                 type: formData.customRecurrence?.type ?? "daysOfWeek",
                                 daysOfWeek: formData.customRecurrence?.daysOfWeek?.filter(d => d !== day) || [],
                                 daysOfMonth: formData.customRecurrence?.daysOfMonth ?? [],
-                                recurring: formData.customRecurrence?.recurring ?? false
+                                recurring: true
                               }
                             })}
                             className="hover:bg-emerald-200 rounded p-0.5"
@@ -2479,14 +2517,14 @@ function TaskItem({
                         const days = formData.customRecurrence?.daysOfMonth || [];
                         setFormData({
                           ...formData,
-                          customRecurrence: {
-                            type: formData.customRecurrence?.type ?? "daysOfMonth",
-                            daysOfWeek: formData.customRecurrence?.daysOfWeek ?? [],
-                            daysOfMonth: days.includes(day)
-                              ? days.filter(d => d !== day)
-                              : [...days, day].sort((a, b) => a - b),
-                            recurring: formData.customRecurrence?.recurring ?? false
-                          }
+                        customRecurrence: {
+                          type: formData.customRecurrence?.type ?? "daysOfMonth",
+                          daysOfWeek: formData.customRecurrence?.daysOfWeek ?? [],
+                          daysOfMonth: days.includes(day)
+                            ? days.filter(d => d !== day)
+                            : [...days, day].sort((a, b) => a - b),
+                          recurring: true
+                        }
                         });
                       }}
                       className={`aspect-square rounded-lg text-sm font-medium transition-all ${
@@ -2515,7 +2553,7 @@ function TaskItem({
                               type: formData.customRecurrence?.type ?? "daysOfMonth",
                               daysOfWeek: formData.customRecurrence?.daysOfWeek ?? [],
                               daysOfMonth: formData.customRecurrence?.daysOfMonth?.filter(d => d !== day) || [],
-                              recurring: formData.customRecurrence?.recurring ?? false
+                              recurring: true
                             }
                           })}
                           className="hover:bg-emerald-200 rounded p-0.5"
@@ -2535,21 +2573,13 @@ function TaskItem({
               <div className="text-sm text-emerald-700">
                 {formData.customRecurrence?.type === "daysOfWeek" ? (
                   formData.customRecurrence?.daysOfWeek && formData.customRecurrence.daysOfWeek.length > 0 ? (
-                    formData.customRecurrence.recurring ? (
-                      `Task will repeat every week on ${formData.customRecurrence.daysOfWeek.length} selected day${formData.customRecurrence.daysOfWeek.length > 1 ? 's' : ''}`
-                    ) : (
-                      `Task will occur once on ${formData.customRecurrence.daysOfWeek.length} selected day${formData.customRecurrence.daysOfWeek.length > 1 ? 's' : ''} this week`
-                    )
+                    `Task will repeat every week on ${formData.customRecurrence.daysOfWeek.length} selected day${formData.customRecurrence.daysOfWeek.length > 1 ? 's' : ''}`
                   ) : (
                     "No days selected"
                   )
                 ) : (
                   formData.customRecurrence?.daysOfMonth && formData.customRecurrence.daysOfMonth.length > 0 ? (
-                    formData.customRecurrence.recurring ? (
-                      `Task will repeat every month on day${formData.customRecurrence.daysOfMonth.length > 1 ? 's' : ''} ${formData.customRecurrence.daysOfMonth.join(', ')}`
-                    ) : (
-                      `Task will occur once this month on day${formData.customRecurrence.daysOfMonth.length > 1 ? 's' : ''} ${formData.customRecurrence.daysOfMonth.join(', ')}`
-                    )
+                    `Task will repeat every month on day${formData.customRecurrence.daysOfMonth.length > 1 ? 's' : ''} ${formData.customRecurrence.daysOfMonth.join(', ')}`
                   ) : (
                     "No days selected"
                   )

@@ -1,6 +1,6 @@
 "use client";
 
-import {Eye} from "lucide-react";
+import {Eye, Clock} from "lucide-react";
 
 interface Project {
   _id: string;
@@ -12,6 +12,9 @@ interface Project {
   status: string;
   clientProgress?: number;
   createdAt: string;
+  plannedDate?: string;
+  plannedTime?: string;
+  plannedDateTime?: string;
 }
 
 interface ProjectCardProps {
@@ -105,6 +108,27 @@ export default function ProjectCard({
           </p>
         </div>
       </div>
+
+      {/* Planned Time */}
+      {project.plannedDate && project.plannedTime && (
+        <div className="mb-4 p-3 bg-purple-50 border border-purple-200 rounded-lg">
+          <div className="flex items-center gap-2 mb-1">
+            <Clock className="w-4 h-4 text-purple-600" />
+            <span className="text-sm font-medium text-purple-900">Planned Time</span>
+          </div>
+          <p className="text-sm text-purple-700">
+            {new Date(`${project.plannedDate}T${project.plannedTime}`).toLocaleString("en-US", {
+              weekday: "long",
+              year: "numeric",
+              month: "long",
+              day: "numeric",
+              hour: "numeric",
+              minute: "2-digit",
+              hour12: true
+            })}
+          </p>
+        </div>
+      )}
 
       {onViewDetails && (
         <button

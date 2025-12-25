@@ -50,6 +50,7 @@ interface Task {
   status: TaskStatus;
   order: number;
   createdAt?: string | Date;
+  notApplicable?: boolean; // If true, bonus/penalty points don't apply
   subtasks?: Subtask[];
 }
 
@@ -401,6 +402,36 @@ export default function AllTasksPage() {
       }
     } catch (error) {
       console.error("Error updating task:", error);
+    }
+  };
+
+  const handleToggleNotApplicable = async (task: Task) => {
+    const currentNotApplicable = Boolean((task as any).notApplicable);
+    const newNotApplicable = !currentNotApplicable;
+    
+    try {
+      const response = await fetch(`/api/employee/tasks/${task._id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notApplicable: newNotApplicable }),
+      });
+
+      if (response.ok) {
+        // Refresh tasks from server
+        await fetchAllTasks();
+      } else {
+        let errorData;
+        try {
+          errorData = await response.json();
+        } catch (e) {
+          errorData = { error: `HTTP ${response.status}: ${response.statusText}` };
+        }
+        console.error("Error updating task:", errorData);
+        alert(errorData.error || "Failed to update task");
+      }
+    } catch (error) {
+      console.error("Error updating task:", error);
+      alert("Failed to update task. Please try again.");
     }
   };
 
@@ -1321,22 +1352,44 @@ export default function AllTasksPage() {
                               className="bg-white rounded-lg border border-neutral-200 p-3 hover:shadow-md transition-shadow cursor-pointer"
                               onClick={() => handleToggleComplete(task)}
                             >
-                              <div className="flex items-start gap-2">
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleToggleComplete(task);
-                                  }}
-                                  className="mt-0.5 flex-shrink-0"
-                                >
-                                  {task.status === "completed" ? (
-                                    <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                                  ) : (
-                                    <Circle className="w-5 h-5 text-neutral-400 hover:text-emerald-600" />
+                              <div className="flex items-start gap-2 min-w-0">
+                                <div className="flex items-center gap-0.5 mt-0.5 flex-shrink-0">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleToggleComplete(task);
+                                    }}
+                                    className="flex-shrink-0"
+                                  >
+                                    {task.status === "completed" ? (
+                                      <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                                    ) : (
+                                      <Circle className="w-5 h-5 text-neutral-400 hover:text-emerald-600" />
+                                    )}
+                                  </button>
+                                  {task.status !== "completed" && (
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleToggleNotApplicable(task);
+                                      }}
+                                      className={`flex-shrink-0 px-1.5 py-0.5 text-[10px] font-bold rounded border ${
+                                        (task as any).notApplicable 
+                                          ? "bg-purple-500 border-purple-600 text-white shadow-sm hover:bg-purple-600 active:bg-purple-700" 
+                                          : "bg-white border-gray-300 text-gray-600 hover:bg-gray-50 hover:border-gray-400 active:bg-gray-100"
+                                      }`}
+                                      title={(task as any).notApplicable ? "Mark as applicable (bonus/penalty will apply)" : "Mark as not applicable (bonus/penalty won't apply)"}
+                                    >
+                                      {(task as any).notApplicable ? "✓" : "NA"}
+                                    </button>
                                   )}
-                                </button>
+                                </div>
                                 <div className="flex-1 min-w-0">
-                                  <div className={`text-sm font-medium ${task.status === "completed" ? "line-through text-neutral-400" : "text-neutral-900"}`}>
+                                  <div className={`text-sm font-medium truncate ${
+                                    task.status === "completed" ? "line-through text-neutral-400" : 
+                                    (task as any).notApplicable ? "text-gray-500" : 
+                                    "text-neutral-900"
+                                  }`}>
                                     {task.title}
                                   </div>
                                   {task.description && (
@@ -1350,7 +1403,7 @@ export default function AllTasksPage() {
                                     <div className="mt-3 pl-4 border-l-2 border-neutral-200">
                                       <div className="text-xs font-semibold text-neutral-600 mb-2">Subtasks</div>
                                       {task.subtasks.map((subtask) => (
-                                        <div key={subtask._id} className="flex items-start gap-2 mb-2">
+                                        <div key={subtask._id} className="flex items-start gap-1.5 mb-2 min-w-0">
                                           <button
                                             onClick={() => handleToggleSubtask(subtask._id, subtask.ticked)}
                                             className="mt-0.5 flex-shrink-0"
@@ -1362,7 +1415,7 @@ export default function AllTasksPage() {
                                             )}
                                           </button>
                                           <div className="flex-1 min-w-0">
-                                            <div className={`text-xs ${subtask.ticked ? "line-through text-neutral-400" : "text-neutral-700"}`}>
+                                            <div className={`text-xs truncate ${subtask.ticked ? "line-through text-neutral-400" : "text-neutral-700"}`}>
                                               {subtask.title}
                                             </div>
                                             {subtask.assigneeName && (
@@ -1440,22 +1493,44 @@ export default function AllTasksPage() {
                             className="bg-white rounded-lg border border-neutral-200 p-4 hover:shadow-md transition-shadow cursor-pointer"
                             onClick={() => handleToggleComplete(task)}
                           >
-                            <div className="flex items-start gap-3">
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleToggleComplete(task);
-                                }}
-                                className="mt-0.5 flex-shrink-0"
-                              >
-                                {task.status === "completed" ? (
-                                  <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                                ) : (
-                                  <Circle className="w-5 h-5 text-neutral-400 hover:text-emerald-600" />
+                            <div className="flex items-start gap-2 min-w-0">
+                              <div className="flex items-center gap-0.5 mt-0.5 flex-shrink-0">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleToggleComplete(task);
+                                  }}
+                                  className="flex-shrink-0"
+                                >
+                                  {task.status === "completed" ? (
+                                    <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                                  ) : (
+                                    <Circle className="w-5 h-5 text-neutral-400 hover:text-emerald-600" />
+                                  )}
+                                </button>
+                                {task.status !== "completed" && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleToggleNotApplicable(task);
+                                    }}
+                                    className={`flex-shrink-0 px-1.5 py-0.5 text-[10px] font-bold rounded border ${
+                                      (task as any).notApplicable 
+                                        ? "bg-purple-500 border-purple-600 text-white shadow-sm hover:bg-purple-600 active:bg-purple-700" 
+                                        : "bg-white border-gray-300 text-gray-600 hover:bg-gray-50 hover:border-gray-400 active:bg-gray-100"
+                                    }`}
+                                    title={(task as any).notApplicable ? "Mark as applicable (bonus/penalty will apply)" : "Mark as not applicable (bonus/penalty won't apply)"}
+                                  >
+                                    {(task as any).notApplicable ? "✓" : "NA"}
+                                  </button>
                                 )}
-                              </button>
+                              </div>
                               <div className="flex-1 min-w-0">
-                                <div className={`text-base font-medium ${task.status === "completed" ? "line-through text-neutral-400" : "text-neutral-900"}`}>
+                                <div className={`text-base font-medium truncate ${
+                                  task.status === "completed" ? "line-through text-neutral-400" : 
+                                  (task as any).notApplicable ? "text-gray-500" : 
+                                  "text-neutral-900"
+                                }`}>
                                   {task.title}
                                 </div>
                                 {task.description && (

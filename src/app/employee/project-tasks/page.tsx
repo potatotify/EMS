@@ -70,6 +70,7 @@ interface Task {
   canTick?: boolean; // Whether employee can tick this task
   createdByEmployee?: boolean; // Whether task was created by an employee
   createdAt?: string | Date; // Task creation date
+  notApplicable?: boolean; // If true, bonus/penalty points don't apply
   subtasks?: Subtask[];
 }
 
@@ -354,6 +355,56 @@ function EmployeeProjectTasksContent() {
         await fetchTasks(projectId!);
       } else {
         const errorData = await response.json();
+        console.error("Error updating task:", errorData);
+        alert(errorData.error || "Failed to update task");
+      }
+    } catch (error) {
+      console.error("Error updating task:", error);
+      alert("Failed to update task. Please try again.");
+    }
+  };
+
+  const handleToggleNotApplicable = async (task: Task) => {
+    // Only allow marking as not applicable if task is assigned to the employee
+    if (task.canTick === false) {
+      alert("You can only mark tasks assigned to you as not applicable.");
+      return;
+    }
+
+    const currentNotApplicable = Boolean((task as any).notApplicable);
+    const newNotApplicable = !currentNotApplicable;
+    
+    try {
+      const response = await fetch(`/api/employee/tasks/${task._id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notApplicable: newNotApplicable }),
+      });
+
+      if (response.ok) {
+        // Optimistically update the UI
+        setTasks((prevTasks) => {
+          const updated = { ...prevTasks };
+          Object.keys(updated).forEach((section) => {
+            updated[section] = updated[section].map((t: Task) => {
+              if (t._id === task._id) {
+                return { ...t, notApplicable: newNotApplicable } as Task;
+              }
+              return t;
+            });
+          });
+          return updated;
+        });
+        
+        // Then refresh from server
+        await fetchTasks(projectId!);
+      } else {
+        let errorData;
+        try {
+          errorData = await response.json();
+        } catch (e) {
+          errorData = { error: `HTTP ${response.status}: ${response.statusText}` };
+        }
         console.error("Error updating task:", errorData);
         alert(errorData.error || "Failed to update task");
       }
@@ -808,6 +859,7 @@ function EmployeeProjectTasksContent() {
                           key={task._id}
                           task={task}
                           onToggleComplete={() => handleToggleComplete(task)}
+                          onToggleNotApplicable={() => handleToggleNotApplicable(task)}
                           onEdit={() => setEditingTask(task)}
                           onTaskClick={() => handleTaskClick(task)}
                           getPriorityColor={getPriorityColor}
@@ -944,6 +996,7 @@ function EmployeeProjectTasksContent() {
                           key={task._id}
                           task={task}
                           onToggleComplete={() => handleToggleComplete(task)}
+                          onToggleNotApplicable={() => handleToggleNotApplicable(task)}
                           onEdit={() => setEditingTask(task)}
                           onTaskClick={() => handleTaskClick(task)}
                           getPriorityColor={getPriorityColor}
@@ -1286,6 +1339,7 @@ function CalendarView({
 function TaskItem({
   task,
   onToggleComplete,
+  onToggleNotApplicable,
   onEdit,
   onTaskClick,
   getPriorityColor,
@@ -1294,46 +1348,72 @@ function TaskItem({
 }: {
   task: Task;
   onToggleComplete: () => void;
+  onToggleNotApplicable?: () => void;
   onEdit: () => void;
   onTaskClick?: () => void;
   getPriorityColor: (priority: number) => string;
   formatDate: (date?: string) => string;
   isOverdue: boolean;
 }) {
+  const isNotApplicable = Boolean((task as any).notApplicable);
+  
+  // Debug: log the task to see if notApplicable is present
+  // console.log('Task:', task._id, 'notApplicable:', (task as any).notApplicable, 'isNotApplicable:', isNotApplicable);
+  
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      className={`flex items-center gap-3 p-3 bg-white rounded-lg border border-neutral-200 shadow-sm group ${
+      className={`flex items-start gap-2 p-3 bg-white rounded-lg border border-neutral-200 shadow-sm group min-w-0 ${
         task.status === "completed" ? "opacity-70" : ""
-      } ${isOverdue ? "border-red-300 bg-red-50" : ""}`}
+      } ${isNotApplicable ? "bg-gray-50 border-gray-300" : ""} ${
+        isOverdue ? "border-red-300 bg-red-50" : ""
+      }`}
     >
-      <button 
-        onClick={onToggleComplete} 
-        className="flex-shrink-0"
-        disabled={task.canTick === false}
-        title={task.canTick === false ? "You can only tick tasks assigned to you" : ""}
-      >
-        {task.status === "completed" ? (
-          <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-        ) : (
-          <Circle className={`w-5 h-5 transition-colors ${
-            task.canTick === false 
-              ? "text-neutral-300 cursor-not-allowed" 
-              : "text-neutral-400 hover:text-emerald-500"
-          }`} />
+      <div className="flex-shrink-0 flex items-center gap-0.5">
+        <button 
+          onClick={onToggleComplete} 
+          disabled={task.canTick === false}
+          title={task.canTick === false ? "You can only tick tasks assigned to you" : ""}
+          className="flex-shrink-0"
+        >
+          {task.status === "completed" ? (
+            <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+          ) : (
+            <Circle className={`w-5 h-5 transition-colors ${
+              task.canTick === false 
+                ? "text-neutral-300 cursor-not-allowed" 
+                : "text-neutral-400 hover:text-emerald-500"
+            }`} />
+          )}
+        </button>
+        {onToggleNotApplicable && task.canTick !== false && task.status !== "completed" && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleNotApplicable();
+            }}
+            className={`flex-shrink-0 px-1.5 py-0.5 text-[10px] font-bold rounded border ${
+              isNotApplicable 
+                ? "bg-purple-500 border-purple-600 text-white shadow-sm hover:bg-purple-600 active:bg-purple-700" 
+                : "bg-white border-gray-300 text-gray-600 hover:bg-gray-50 hover:border-gray-400 active:bg-gray-100"
+            }`}
+            title={isNotApplicable ? "Mark as applicable (bonus/penalty will apply)" : "Mark as not applicable (bonus/penalty won't apply)"}
+          >
+            {isNotApplicable ? "✓" : "NA"}
+          </button>
         )}
-      </button>
-      <div className="flex-1">
-        <div className="flex items-center gap-2">
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={(e) => {
               e.stopPropagation();
               if (onTaskClick) onTaskClick();
             }}
-            className={`font-medium text-neutral-800 text-left hover:underline cursor-pointer ${
+            className={`font-medium text-neutral-800 text-left hover:underline cursor-pointer truncate ${
               task.status === "completed" ? "line-through text-neutral-500" : ""
-            }`}
+            } ${isNotApplicable ? "text-gray-500" : ""}`}
           >
             {task.title}
           </button>
@@ -1352,7 +1432,7 @@ function TaskItem({
           <p className="text-xs text-neutral-500 mt-0.5">{task.description}</p>
         )}
         
-        <div className="flex items-center gap-2 text-xs mt-1 text-neutral-500">
+        <div className="flex items-center gap-2 text-xs mt-1 text-neutral-500 flex-wrap">
           {/* Show assigned to label */}
           {task.assignedTo && (
             <span className="flex items-center gap-1 text-blue-600 font-medium">
@@ -1386,14 +1466,19 @@ function TaskItem({
           <span className={`flex items-center gap-1 ${getPriorityColor(task.priority)}`}>
             <Flag className="w-3 h-3" /> P{task.priority}
           </span>
-          {task.bonusPoints && task.bonusPoints > 0 && (
+          {!isNotApplicable && task.bonusPoints && task.bonusPoints > 0 && (
             <span className="flex items-center gap-1 text-emerald-600">
               +{task.bonusPoints} pts
             </span>
           )}
-          {task.penaltyPoints && task.penaltyPoints > 0 && (
+          {!isNotApplicable && task.penaltyPoints && task.penaltyPoints > 0 && (
             <span className="flex items-center gap-1 text-red-600">
               -{task.penaltyPoints} pts
+            </span>
+          )}
+          {isNotApplicable && (
+            <span className="flex items-center gap-1 text-gray-500 italic text-xs">
+              Bonus/Penalty N/A
             </span>
           )}
         </div>

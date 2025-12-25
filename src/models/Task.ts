@@ -42,6 +42,7 @@ export interface ITask extends Document {
   completedAt?: Date;
   completedBy?: mongoose.Types.ObjectId;
   tickedAt?: Date; // When employee ticks/completes the task
+  notApplicable?: boolean; // If true, bonus/penalty points don't apply to this task
   
   // Approval
   approvedBy?: mongoose.Types.ObjectId; // Admin who approved
@@ -192,6 +193,10 @@ const TaskSchema = new Schema<ITask>(
     },
     tickedAt: {
       type: Date,
+    },
+    notApplicable: {
+      type: Boolean,
+      default: false,
     },
     approvedBy: {
       type: Schema.Types.ObjectId,

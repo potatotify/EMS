@@ -392,16 +392,21 @@ export async function resetRecurringTasksForProject(projectId: string): Promise<
     const tasks = await tasksCollection.find({
       projectId: new ObjectId(projectId),
       status: "completed",
-      taskKind: { $in: ["daily", "weekly", "monthly", "recurring"] }
+      taskKind: { $in: ["daily", "weekly", "monthly", "recurring", "custom"] }
     }).toArray();
 
     let resetCount = 0;
 
     for (const task of tasks) {
+      // For custom tasks, pass customRecurrence as part of recurringPattern
+      const patternToUse = task.taskKind === "custom" && task.customRecurrence
+        ? { customRecurrence: task.customRecurrence }
+        : task.recurringPattern;
+        
       const check = shouldResetRecurringTask(
         task.taskKind as string,
         task.completedAt || task.tickedAt,
-        task.recurringPattern
+        patternToUse
       );
 
       if (check.shouldReset) {
