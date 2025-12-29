@@ -42,6 +42,7 @@ export interface ITask extends Document {
   completedAt?: Date;
   completedBy?: mongoose.Types.ObjectId;
   tickedAt?: Date; // When employee ticks/completes the task
+  timeSpent?: number; // Time spent on task in hours
   notApplicable?: boolean; // If true, bonus/penalty points don't apply to this task
   
   // Approval
@@ -193,6 +194,10 @@ const TaskSchema = new Schema<ITask>(
     },
     tickedAt: {
       type: Date,
+    },
+    timeSpent: {
+      type: Number,
+      min: 0,
     },
     notApplicable: {
       type: Boolean,

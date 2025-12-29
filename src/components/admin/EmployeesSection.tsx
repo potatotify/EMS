@@ -1,12 +1,13 @@
 "use client";
 
 import {useState, useEffect} from "react";
-import {Users, Calendar, CheckCircle, XCircle, Eye, Search, RefreshCw} from "lucide-react";
+import {Users, Calendar, CheckCircle, XCircle, Eye, Search, RefreshCw, Clock} from "lucide-react";
 import {motion} from "framer-motion";
 import EmployeeDetailModal from "./EmployeeDetailModal";
 
 interface Employee {
   _id: string;
+  userId: string;
   fullName: string;
   email: string;
   attendanceCount?: number;
@@ -24,6 +25,8 @@ interface AttendanceRecord {
 export default function EmployeesSection() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [attendanceData, setAttendanceData] = useState<Record<string, AttendanceRecord[]>>({});
+  const [monthlyAttendanceData, setMonthlyAttendanceData] = useState<Record<string, number>>({});
+  const [hoursWorkedData, setHoursWorkedData] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
@@ -38,6 +41,8 @@ export default function EmployeesSection() {
   useEffect(() => {
     if (employees.length > 0) {
       fetchAttendanceForAll();
+      fetchMonthlyAttendance();
+      fetchHoursWorked();
     }
   }, [employees, selectedDate]);
 
@@ -91,6 +96,61 @@ export default function EmployeesSection() {
       setAttendanceData(attendanceMap);
     } catch (error) {
       console.error("Error fetching attendance:", error);
+    }
+  };
+
+  const fetchMonthlyAttendance = async () => {
+    if (employees.length === 0) return;
+    
+    try {
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      startOfMonth.setHours(0, 0, 0, 0);
+      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      endOfMonth.setHours(23, 59, 59, 999);
+
+      const attendancePromises = employees.map(async (emp) => {
+        try {
+          const response = await fetch(`/api/admin/employee/${emp._id}`);
+          const data = await response.json();
+          if (response.ok && data.attendanceRecords) {
+            const monthlyCount = data.attendanceRecords.filter((record: AttendanceRecord) => {
+              const recordDate = new Date(record.date);
+              return recordDate >= startOfMonth && recordDate <= endOfMonth;
+            }).length;
+            return {employeeId: emp._id, count: monthlyCount};
+          }
+        } catch (error) {
+          console.error(`Error fetching monthly attendance for ${emp._id}:`, error);
+        }
+        return {employeeId: emp._id, count: 0};
+      });
+
+      const results = await Promise.all(attendancePromises);
+      const monthlyCountMap: Record<string, number> = {};
+      results.forEach((result) => {
+        monthlyCountMap[result.employeeId] = result.count;
+      });
+      setMonthlyAttendanceData(monthlyCountMap);
+    } catch (error) {
+      console.error("Error fetching monthly attendance:", error);
+    }
+  };
+
+  const fetchHoursWorked = async () => {
+    if (employees.length === 0) return;
+    
+    try {
+      console.log('[EmployeesSection] Fetching hours worked...');
+      const response = await fetch("/api/admin/employee/hours-worked");
+      const data = await response.json();
+      console.log('[EmployeesSection] Hours worked response:', data);
+      if (response.ok && data.hoursMap) {
+        console.log('[EmployeesSection] Setting hours worked data:', data.hoursMap);
+        setHoursWorkedData(data.hoursMap);
+      }
+    } catch (error) {
+      console.error("Error fetching hours worked:", error);
     }
   };
 
@@ -160,13 +220,16 @@ export default function EmployeesSection() {
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white">
+            <thead className="bg-linear-to-r from-emerald-600 to-teal-600 text-white">
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
                   Employee
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
-                  Email
+                  This Month's Attendance
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
+                  Hours Worked
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
                   Attendance Status
@@ -182,7 +245,7 @@ export default function EmployeesSection() {
             <tbody className="bg-white divide-y divide-gray-200">
               {filteredEmployees.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
+                  <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
                     {searchTerm ? "No employees found matching your search" : "No employees found"}
                   </td>
                 </tr>
@@ -199,7 +262,7 @@ export default function EmployeesSection() {
                     >
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
-                          <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white font-semibold text-sm">
+                          <div className="h-10 w-10 rounded-lg bg-linear-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white font-semibold text-sm">
                             {employee.fullName.charAt(0).toUpperCase()}
                           </div>
                           <span className="font-medium text-gray-900">
@@ -207,8 +270,21 @@ export default function EmployeesSection() {
                           </span>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-600">
-                        {employee.email}
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <Calendar className="w-4 h-4 text-gray-500" />
+                          <span className="text-sm font-semibold text-gray-900">
+                            {monthlyAttendanceData[employee._id] || 0} days
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <Clock className="w-4 h-4 text-blue-500" />
+                          <span className="text-sm font-semibold text-blue-900" title={`User ID: ${employee.userId}, Hours: ${hoursWorkedData[employee.userId] || 0}`}>
+                            {(hoursWorkedData[employee.userId] || 0).toFixed(1)}h
+                          </span>
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         {attendance.present ? (

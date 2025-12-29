@@ -28,13 +28,6 @@ interface EmployeeProfile {
   joiningDate?: string;
 }
 
-interface DailyUpdateRecord {
-  _id: string;
-  date: string;
-  status: string;
-  adminApproved: boolean;
-}
-
 interface AttendanceRecord {
   _id: string;
   userId: string;
@@ -42,17 +35,6 @@ interface AttendanceRecord {
   workDetails: string;
   status?: string; // Add status field
   createdAt: string;
-}
-
-interface DailyUpdate {
-  _id: string;
-  date: string;
-  tasksCompleted: string[];
-  challenges?: string;
-  nextSteps?: string;
-  notes?: string;
-  adminApproved?: boolean;
-  status?: string;
 }
 
 interface Task {
@@ -78,7 +60,6 @@ interface Props {
 export default function EmployeeDetailModal({ employeeId, onClose }: Props) {
   const [profile, setProfile] = useState<EmployeeProfile | null>(null);
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
-  const [dailyUpdates, setDailyUpdate] = useState<DailyUpdate[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("attendance"); // Default to attendance tab
@@ -106,7 +87,6 @@ export default function EmployeeDetailModal({ employeeId, onClose }: Props) {
       if (response.ok) {
         setProfile(data.profile);
         setAttendance(data.attendanceRecords || []);
-        setDailyUpdate(data.dailyUpdates || []);
       } else {
         console.error("Error fetching employee details:", data.error);
       }
@@ -249,15 +229,6 @@ export default function EmployeeDetailModal({ employeeId, onClose }: Props) {
             >
               Attendance
             </button>
-            <button
-              onClick={() => setActiveTab("updates")}
-              className={`${activeTab === "updates"
-                  ? "border-emerald-500 text-emerald-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                } whitespace-nowrap py-4 px-6 border-b-2 font-medium text-sm`}
-            >
-              Daily Updates ({dailyUpdates.length})
-            </button>
           </nav>
         </div>
 
@@ -348,51 +319,6 @@ export default function EmployeeDetailModal({ employeeId, onClose }: Props) {
                     )}
                   </div>
                 </div>
-                <div className="p-4 rounded-xl border border-blue-100/50 bg-blue-50/50 backdrop-blur-sm">
-                  <h3 className="text-sm font-semibold text-blue-900 mb-3">
-                    Daily Updates
-                  </h3>
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-3">
-                      <div className="h-8 w-8 rounded-lg bg-blue-100 flex items-center justify-center">
-                        <ClipboardList className="h-4 w-4 text-blue-600" />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-xs text-gray-500">
-                          Total Submissions
-                        </p>
-                        <p className="text-sm font-medium text-gray-900">
-                          {dailyUpdates.length}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <div className="h-8 w-8 rounded-lg bg-blue-100 flex items-center justify-center">
-                        <CheckCircle className="h-4 w-4 text-blue-600" />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-xs text-gray-500">Approved</p>
-                        <p className="text-sm font-medium text-gray-900">
-                          {
-                            dailyUpdates.filter((u: any) => u.adminApproved)
-                              .length
-                          }
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <div className="h-8 w-8 rounded-lg bg-blue-100 flex items-center justify-center">
-                        <Clock className="h-4 w-4 text-blue-600" />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-xs text-gray-500">Employee ID</p>
-                        <p className="text-xs font-mono text-gray-900 truncate">
-                          {profile._id}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
               </div>
             </div>
           )}
@@ -401,14 +327,14 @@ export default function EmployeeDetailModal({ employeeId, onClose }: Props) {
             <div>
               <div className="flex justify-between items-center mb-6">
                 <h3 className="text-lg font-medium text-gray-900">
-                  Daily Updates Attendance
+                  Attendance Records
                 </h3>
                 <div className="text-sm text-gray-500">
-                  {dailyUpdates.length} submissions
+                  {attendance.length} records
                 </div>
               </div>
 
-              {dailyUpdates.length > 0 ? (
+              {attendance.length > 0 ? (
                 <div className="space-y-6">
                   {/* Calendar View */}
                   <div className="bg-white p-6 rounded-lg border border-gray-200">
@@ -439,10 +365,10 @@ export default function EmployeeDetailModal({ employeeId, onClose }: Props) {
                         const daysInMonth = lastDay.getDate();
                         const startingDayOfWeek = firstDay.getDay();
 
-                        // Get all submission dates
-                        const submissionDates = new Set(
-                          dailyUpdates.map((update) => {
-                            const date = new Date(update.date);
+                        // Get all attendance dates
+                        const attendanceDates = new Set(
+                          attendance.map((record) => {
+                            const date = new Date(record.date);
                             return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
                           })
                         );
@@ -459,12 +385,12 @@ export default function EmployeeDetailModal({ employeeId, onClose }: Props) {
                         // Days of the month
                         for (let day = 1; day <= daysInMonth; day++) {
                           const dateKey = `${currentYear}-${currentMonth}-${day}`;
-                          const hasSubmission = submissionDates.has(dateKey);
+                          const hasAttendance = attendanceDates.has(dateKey);
 
                           days.push(
                             <div
                               key={day}
-                              className={`p-2 text-center rounded text-sm font-medium ${hasSubmission
+                              className={`p-2 text-center rounded text-sm font-medium ${hasAttendance
                                   ? "bg-green-100 text-green-800 border-2 border-green-400"
                                   : "bg-gray-100 text-gray-600"
                                 }`}
@@ -480,11 +406,11 @@ export default function EmployeeDetailModal({ employeeId, onClose }: Props) {
                     <div className="mt-4 flex gap-4 text-sm">
                       <div className="flex items-center gap-2">
                         <div className="w-4 h-4 bg-green-100 border-2 border-green-400 rounded"></div>
-                        <span>Submitted</span>
+                        <span>Present</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <div className="w-4 h-4 bg-gray-100 rounded"></div>
-                        <span>No submission</span>
+                        <span>Absent</span>
                       </div>
                     </div>
                   </div>
@@ -492,24 +418,19 @@ export default function EmployeeDetailModal({ employeeId, onClose }: Props) {
                   {/* Detailed List */}
                   <div className="bg-white p-6 rounded-lg border border-gray-200">
                     <h4 className="font-medium text-gray-900 mb-4">
-                      Submission Details
+                      Attendance Details
                     </h4>
                     <div className="space-y-3">
-                      {dailyUpdates.map((update) => (
+                      {attendance.map((record) => (
                         <div
-                          key={update._id}
+                          key={record._id}
                           className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
                         >
                           <div className="flex items-center gap-3">
-                            <div
-                              className={`w-3 h-3 rounded-full ${update.adminApproved
-                                  ? "bg-green-500"
-                                  : "bg-yellow-500"
-                                }`}
-                            ></div>
+                            <div className="w-3 h-3 rounded-full bg-green-500"></div>
                             <div>
                               <p className="text-sm font-medium text-gray-900">
-                                {new Date(update.date).toLocaleDateString(
+                                {new Date(record.date).toLocaleDateString(
                                   "en-US",
                                   {
                                     weekday: "short",
@@ -520,17 +441,12 @@ export default function EmployeeDetailModal({ employeeId, onClose }: Props) {
                                 )}
                               </p>
                               <p className="text-xs text-gray-500">
-                                {update.status}
+                                {record.workDetails || "No details provided"}
                               </p>
                             </div>
                           </div>
-                          <span
-                            className={`px-2 py-1 text-xs font-semibold rounded ${update.adminApproved
-                                ? "bg-green-100 text-green-800"
-                                : "bg-yellow-100 text-yellow-800"
-                              }`}
-                          >
-                            {update.adminApproved ? "Approved" : "Pending"}
+                          <span className="px-2 py-1 text-xs font-semibold rounded bg-green-100 text-green-800">
+                            Present
                           </span>
                         </div>
                       ))}
@@ -541,107 +457,10 @@ export default function EmployeeDetailModal({ employeeId, onClose }: Props) {
                 <div className="text-center py-12 border-2 border-dashed border-gray-300 rounded-lg">
                   <Calendar className="mx-auto h-12 w-12 text-gray-400" />
                   <h3 className="mt-2 text-sm font-medium text-gray-900">
-                    No daily updates
+                    No attendance records
                   </h3>
                   <p className="mt-1 text-sm text-gray-500">
-                    No daily update submissions found for this employee.
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {activeTab === "updates" && (
-            <div>
-              <div className="flex justify-between items-center mb-6">
-                <h3 className="text-lg font-medium text-gray-900">
-                  Daily Updates
-                </h3>
-                <div className="text-sm text-gray-500">
-                  Showing {dailyUpdates.length} updates
-                </div>
-              </div>
-
-              {dailyUpdates.length > 0 ? (
-                <div className="space-y-4">
-                  {dailyUpdates.map((update) => (
-                    <div
-                      key={update._id}
-                      className="group border border-emerald-100/50 rounded-xl overflow-hidden bg-white/50 backdrop-blur-sm hover:border-emerald-200 hover:shadow-md transition-all duration-300"
-                    >
-                      <div className="px-4 py-3 bg-linear-to-r from-emerald-50 to-teal-50 border-b border-emerald-100/50">
-                        <div className="flex justify-between items-center">
-                          <div className="flex items-center gap-2">
-                            <div className="h-8 w-8 rounded-lg bg-emerald-100 flex items-center justify-center">
-                              <Calendar className="h-4 w-4 text-emerald-600" />
-                            </div>
-                            <span className="text-sm font-semibold text-gray-900">
-                              {formatDate(update.date)}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="p-4 space-y-4">
-                        {update.tasksCompleted &&
-                          update.tasksCompleted.length > 0 && (
-                            <div className="mb-4">
-                              <h4 className="text-sm font-medium text-gray-700 mb-2">
-                                Tasks Completed
-                              </h4>
-                              <ul className="list-disc pl-5 space-y-1">
-                                {update.tasksCompleted.map((task, idx) => (
-                                  <li
-                                    key={idx}
-                                    className="text-sm text-gray-600"
-                                  >
-                                    {task}
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-                        {update.challenges && (
-                          <div className="mb-4">
-                            <h4 className="text-sm font-medium text-gray-700 mb-1">
-                              Challenges Faced
-                            </h4>
-                            <p className="text-sm text-gray-600">
-                              {update.challenges}
-                            </p>
-                          </div>
-                        )}
-                        {update.nextSteps && (
-                          <div className="mb-4">
-                            <h4 className="text-sm font-medium text-gray-700 mb-1">
-                              Next Steps
-                            </h4>
-                            <p className="text-sm text-gray-600">
-                              {update.nextSteps}
-                            </p>
-                          </div>
-                        )}
-                        {update.notes && (
-                          <div className="pt-3 mt-3 border-t border-gray-100">
-                            <h4 className="text-sm font-medium text-gray-700 mb-1">
-                              Notes
-                            </h4>
-                            <p className="text-sm text-gray-600">
-                              {update.notes}
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-12 border-2 border-dashed border-gray-300 rounded-lg">
-                  <ClipboardList className="mx-auto h-12 w-12 text-gray-400" />
-                  <h3 className="mt-2 text-sm font-medium text-gray-900">
-                    No daily updates
-                  </h3>
-                  <p className="mt-1 text-sm text-gray-500">
-                    No daily updates found for this employee.
+                    No attendance records found for this employee.
                   </p>
                 </div>
               )}

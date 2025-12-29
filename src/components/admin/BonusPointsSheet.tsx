@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { FileSpreadsheet, RefreshCw, Plus, X } from "lucide-react";
+import { FileSpreadsheet, RefreshCw, Plus, X, Eye } from "lucide-react";
 import LoadingSpinner from "@/components/shared/LoadingSpinner";
 
 interface CustomEntry {
@@ -49,6 +49,9 @@ export default function BonusPointsSheet() {
   const [endDateFilter, setEndDateFilter] = useState<string>("");
   const [editingCell, setEditingCell] = useState<string | null>(null);
   const [savingCell, setSavingCell] = useState<string | null>(null);
+  const [showDetailModal, setShowDetailModal] = useState(false);
+  const [detailData, setDetailData] = useState<any>(null);
+  const [loadingDetails, setLoadingDetails] = useState(false);
 
   const fetchRows = async () => {
     setLoading(true);
@@ -126,6 +129,36 @@ export default function BonusPointsSheet() {
     }
   };
 
+  const fetchEmployeeDetails = async () => {
+    if (employeeFilter === "all") {
+      alert("Please select a specific employee to view details");
+      return;
+    }
+
+    setLoadingDetails(true);
+    try {
+      const params = new URLSearchParams();
+      params.append("employeeName", employeeFilter);
+      if (startDateFilter) params.append("startDate", startDateFilter);
+      if (endDateFilter) params.append("endDate", endDateFilter);
+
+      const response = await fetch(`/api/admin/bonus-summary/details?${params.toString()}`);
+      const data = await response.json();
+      
+      if (response.ok) {
+        setDetailData(data);
+        setShowDetailModal(true);
+      } else {
+        alert(data.error || "Failed to fetch details");
+      }
+    } catch (error) {
+      console.error("Error fetching employee details:", error);
+      alert("Error fetching employee details");
+    } finally {
+      setLoadingDetails(false);
+    }
+  };
+
   const employeeOptions = Array.from(
     new Set(rows.map((r) => r.employeeName).filter(Boolean))
   ).sort();
@@ -175,18 +208,29 @@ export default function BonusPointsSheet() {
         <div className="flex flex-col items-end gap-2">
           {/* Filters */}
           <div className="flex flex-wrap items-center gap-2 justify-end text-xs">
-            <select
-              value={employeeFilter}
-              onChange={(e) => setEmployeeFilter(e.target.value)}
-              className="bg-white border border-neutral-300 rounded-lg px-2 py-1 text-xs text-neutral-800 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-200"
-            >
-              <option value="all">All Employees</option>
-              {employeeOptions.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
+            <div className="flex items-center gap-2">
+              <select
+                value={employeeFilter}
+                onChange={(e) => setEmployeeFilter(e.target.value)}
+                className="bg-white border border-neutral-300 rounded-lg px-2 py-1 text-xs text-neutral-800 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-200"
+              >
+                <option value="all">All Employees</option>
+                {employeeOptions.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={fetchEmployeeDetails}
+                disabled={loadingDetails || employeeFilter === "all"}
+                className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                title="View detailed breakdown"
+              >
+                <Eye className="w-3.5 h-3.5" />
+                {loadingDetails ? "Loading..." : "View Details"}
+              </button>
+            </div>
             <div className="flex items-center gap-1">
               <span className="text-neutral-500">From</span>
               <input
@@ -473,6 +517,229 @@ export default function BonusPointsSheet() {
           </div>
         );
       })()}
+
+      {/* Employee Details Modal */}
+      {showDetailModal && detailData && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowDetailModal(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-7xl w-full max-h-[90vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div className="px-6 py-4 bg-linear-to-r from-emerald-600 to-teal-600 text-white flex items-center justify-between">
+              <div>
+                <h3 className="text-xl font-bold">{detailData.employeeName} - Bonus & Penalty Breakdown</h3>
+                <p className="text-sm text-emerald-100 mt-1">
+                  {startDateFilter && endDateFilter 
+                    ? `${new Date(startDateFilter).toLocaleDateString()} - ${new Date(endDateFilter).toLocaleDateString()}`
+                    : "All time"}
+                </p>
+              </div>
+              <button
+                onClick={() => setShowDetailModal(false)}
+                className="p-2 hover:bg-white/20 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-6 overflow-y-auto max-h-[calc(90vh-160px)]">
+              {(() => {
+                // Combine all entries into a single array
+                const allEntries: any[] = [];
+
+                // Add tasks
+                if (detailData.tasks && detailData.tasks.length > 0) {
+                  detailData.tasks.forEach((task: any) => {
+                    allEntries.push({
+                      date: new Date(task.date),
+                      source: 'Task',
+                      description: task.taskTitle,
+                      project: task.projectName,
+                      bonusPoints: task.bonusPoints || 0,
+                      bonusCurrency: task.bonusCurrency || 0,
+                      penaltyPoints: task.penaltyPoints || 0,
+                      penaltyCurrency: task.penaltyCurrency || 0
+                    });
+                  });
+                }
+
+                // Add checklists
+                if (detailData.checklists && detailData.checklists.length > 0) {
+                  detailData.checklists.forEach((item: any) => {
+                    allEntries.push({
+                      date: new Date(item.date),
+                      source: 'Checklist',
+                      description: item.description,
+                      project: '-',
+                      bonusPoints: item.bonusPoints || 0,
+                      bonusCurrency: item.bonusCurrency || 0,
+                      penaltyPoints: item.penaltyPoints || 0,
+                      penaltyCurrency: item.penaltyCurrency || 0
+                    });
+                  });
+                }
+
+                // Add projects
+                if (detailData.projects && detailData.projects.length > 0) {
+                  detailData.projects.forEach((project: any) => {
+                    allEntries.push({
+                      date: new Date(project.date),
+                      source: 'Project',
+                      description: project.description,
+                      project: project.projectName || '-',
+                      bonusPoints: project.bonusPoints || 0,
+                      bonusCurrency: project.bonusCurrency || 0,
+                      penaltyPoints: project.penaltyPoints || 0,
+                      penaltyCurrency: project.penaltyCurrency || 0
+                    });
+                  });
+                }
+
+                // Add custom bonus
+                if (detailData.customBonus && detailData.customBonus.length > 0) {
+                  detailData.customBonus.forEach((item: any) => {
+                    allEntries.push({
+                      date: new Date(item.date),
+                      source: 'Custom Bonus',
+                      description: item.description,
+                      project: '-',
+                      bonusPoints: item.type === 'points' ? item.value : 0,
+                      bonusCurrency: item.type === 'currency' ? item.value : 0,
+                      penaltyPoints: 0,
+                      penaltyCurrency: 0
+                    });
+                  });
+                }
+
+                // Add custom fine
+                if (detailData.customFine && detailData.customFine.length > 0) {
+                  detailData.customFine.forEach((item: any) => {
+                    allEntries.push({
+                      date: new Date(item.date),
+                      source: 'Custom Fine',
+                      description: item.description,
+                      project: '-',
+                      bonusPoints: 0,
+                      bonusCurrency: 0,
+                      penaltyPoints: item.type === 'points' ? item.value : 0,
+                      penaltyCurrency: item.type === 'currency' ? item.value : 0
+                    });
+                  });
+                }
+
+                // Sort by date (most recent first)
+                allEntries.sort((a, b) => b.date.getTime() - a.date.getTime());
+
+                return (
+                  <div className="bg-white border border-neutral-200 rounded-lg overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead className="bg-neutral-50 border-b-2 border-neutral-300 sticky top-0">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-neutral-800 uppercase">Date</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-neutral-800 uppercase">Source</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-neutral-800 uppercase">Description</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-neutral-800 uppercase">Project</th>
+                          <th className="px-4 py-3 text-center text-xs font-semibold text-emerald-700 uppercase">Bonus Points</th>
+                          <th className="px-4 py-3 text-center text-xs font-semibold text-emerald-700 uppercase">Bonus ₹</th>
+                          <th className="px-4 py-3 text-center text-xs font-semibold text-red-700 uppercase">Penalty Points</th>
+                          <th className="px-4 py-3 text-center text-xs font-semibold text-red-700 uppercase">Penalty ₹</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-neutral-200">
+                        {allEntries.length > 0 ? (
+                          allEntries.map((entry, idx) => (
+                            <tr key={idx} className="hover:bg-neutral-50 transition-colors">
+                              <td className="px-4 py-3 text-neutral-700 whitespace-nowrap">
+                                {entry.date.toLocaleDateString()}
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${
+                                  entry.source === 'Task' 
+                                    ? 'bg-blue-100 text-blue-700' 
+                                    : entry.source === 'Checklist'
+                                    ? 'bg-purple-100 text-purple-700'
+                                    : entry.source === 'Project'
+                                    ? 'bg-teal-100 text-teal-700'
+                                    : entry.source === 'Custom Bonus'
+                                    ? 'bg-indigo-100 text-indigo-700'
+                                    : 'bg-rose-100 text-rose-700'
+                                }`}>
+                                  {entry.source}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-neutral-900 font-medium max-w-md truncate" title={entry.description}>
+                                {entry.description}
+                              </td>
+                              <td className="px-4 py-3 text-neutral-600">
+                                {entry.project}
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                {entry.bonusPoints > 0 ? (
+                                  <span className="text-emerald-600 font-semibold">+{entry.bonusPoints}</span>
+                                ) : (
+                                  <span className="text-neutral-400">-</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                {entry.bonusCurrency > 0 ? (
+                                  <span className="text-emerald-600 font-semibold">+₹{entry.bonusCurrency}</span>
+                                ) : (
+                                  <span className="text-neutral-400">-</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                {entry.penaltyPoints > 0 ? (
+                                  <span className="text-red-600 font-semibold">-{entry.penaltyPoints}</span>
+                                ) : (
+                                  <span className="text-neutral-400">-</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                {entry.penaltyCurrency > 0 ? (
+                                  <span className="text-red-600 font-semibold">-₹{entry.penaltyCurrency}</span>
+                                ) : (
+                                  <span className="text-neutral-400">-</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td colSpan={8} className="px-4 py-8 text-center text-neutral-500">
+                              No bonus or penalty records found for this period
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Summary Footer */}
+            <div className="px-6 py-4 bg-neutral-50 border-t-2 border-neutral-200">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="text-center">
+                  <p className="text-xs text-neutral-600 font-medium mb-1">Total Points Earned</p>
+                  <p className="text-2xl font-bold text-emerald-600">+{detailData.summary?.totalPointsEarned || 0}</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-xs text-neutral-600 font-medium mb-1">Total Currency Earned</p>
+                  <p className="text-2xl font-bold text-emerald-600">+₹{detailData.summary?.totalCurrencyEarned || 0}</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-xs text-neutral-600 font-medium mb-1">Total Points Penalty</p>
+                  <p className="text-2xl font-bold text-red-600">-{detailData.summary?.totalPointsPenalty || 0}</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-xs text-neutral-600 font-medium mb-1">Total Currency Penalty</p>
+                  <p className="text-2xl font-bold text-red-600">-₹{detailData.summary?.totalCurrencyPenalty || 0}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Summary */}
       <div className="text-sm text-neutral-600">

@@ -17,6 +17,7 @@ interface Project {
   loomLink?: string;
   whatsappGroupLink?: string;
   leadAssignee?: any;
+  assignees?: any[];
 }
 
 interface ProjectProgressCardProps {
@@ -52,6 +53,24 @@ export default function ProjectProgressCard({
       return project.leadAssignee._id === userId;
     }
     return project.leadAssignee === userId;
+  })();
+
+  // Check if current user is assigned to the project (lead or regular assignee)
+  const isAssignedToProject = (() => {
+    // Check if user is lead assignee
+    if (isLeadAssignee) return true;
+
+    // Check if user is in assignees array
+    if (project.assignees && Array.isArray(project.assignees)) {
+      return project.assignees.some((assignee: any) => {
+        if (typeof assignee === 'object' && assignee._id) {
+          return assignee._id === userId;
+        }
+        return assignee === userId;
+      });
+    }
+
+    return false;
   })();
 
   const getPriorityColor = (priority: string) => {
@@ -167,7 +186,7 @@ export default function ProjectProgressCard({
             <ListTodo className="w-4 h-4" />
             View Tasks
           </button>
-          {isLeadAssignee ? (
+          {isAssignedToProject ? (
             <button
               onClick={() => onUpdate(project)}
               className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium transition-colors"
@@ -178,7 +197,7 @@ export default function ProjectProgressCard({
           ) : (
             <div className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 bg-gray-300 text-gray-600 rounded-lg font-medium cursor-not-allowed">
               <Lock className="w-4 h-4" />
-              Lead Only
+              Not Assigned
             </div>
           )}
         </div>

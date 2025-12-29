@@ -51,6 +51,7 @@ interface Task {
   order: number;
   createdAt?: string | Date;
   notApplicable?: boolean; // If true, bonus/penalty points don't apply
+  timeSpent?: number; // Time spent on task in hours
   subtasks?: Subtask[];
 }
 
@@ -390,11 +391,32 @@ export default function AllTasksPage() {
     }
     
     const newStatus = task.status === "completed" ? "pending" : "completed";
+    
+    // If completing the task, ask for time spent
+    let timeSpent: number | undefined;
+    if (newStatus === "completed") {
+      const timeInput = prompt("How many hours did you spend on this task?");
+      if (timeInput === null) {
+        return; // User cancelled
+      }
+      const parsedTime = parseFloat(timeInput);
+      if (isNaN(parsedTime) || parsedTime < 0) {
+        alert("Please enter a valid number of hours (e.g., 2.5 for 2 hours 30 minutes)");
+        return;
+      }
+      timeSpent = parsedTime;
+    }
+    
     try {
+      const requestBody: any = { status: newStatus };
+      if (timeSpent !== undefined) {
+        requestBody.timeSpent = timeSpent;
+      }
+      
       const response = await fetch(`/api/employee/tasks/${task._id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify(requestBody),
       });
 
       if (response.ok) {

@@ -15,46 +15,81 @@ export async function GET(request: NextRequest) {
     const client = await clientPromise;
     const db = client.db("worknest");
 
-    // Calculate date 10 days ago
-    const tenDaysAgo = new Date();
-    tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
-    tenDaysAgo.setHours(0, 0, 0, 0);
+    // Get query parameters for date filtering
+    const { searchParams } = new URL(request.url);
+    const projectId = searchParams.get("projectId");
+    const startDate = searchParams.get("startDate");
+    const endDate = searchParams.get("endDate");
+    const days = searchParams.get("days");
 
-    // Fetch all projects
-    const projects = await db
-      .collection("projects")
-      .find({})
-      .sort({ createdAt: -1 })
-      .toArray();
+    // Calculate date range
+    let dateFilter: any = {};
+    if (startDate && endDate) {
+      dateFilter = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate + "T23:59:59.999Z")
+      };
+    } else if (days) {
+      const daysAgo = new Date();
+      daysAgo.setDate(daysAgo.getDate() - parseInt(days));
+      daysAgo.setHours(0, 0, 0, 0);
+      dateFilter = { $gte: daysAgo };
+    } else {
+      // Default: 10 days ago
+      const tenDaysAgo = new Date();
+      tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
+      tenDaysAgo.setHours(0, 0, 0, 0);
+      dateFilter = { $gte: tenDaysAgo };
+    }
 
-    // For each project, fetch daily updates from the last 10 days
+    // Fetch projects - either specific project or all projects
+    let projects;
+    if (projectId) {
+      const project = await db
+        .collection("projects")
+        .findOne({ _id: new ObjectId(projectId) });
+      projects = project ? [project] : [];
+    } else {
+      projects = await db
+        .collection("projects")
+        .find({})
+        .sort({ createdAt: -1 })
+        .toArray();
+    }
+
+    // For each project, fetch daily updates within date range
     const projectsWithUpdates = await Promise.all(
       projects.map(async (project) => {
-        // Fetch daily updates for this project from the last 10 days
+        // Fetch daily updates for this project within date range
         const updates = await db
           .collection("dailyUpdates")
           .find({
             projectId: project._id,
-            date: { $gte: tenDaysAgo },
+            date: dateFilter,
           })
           .sort({ date: -1 })
-          .limit(10)
           .toArray();
 
         // Populate employee name for each update
         const populatedUpdates = await Promise.all(
           updates.map(async (update) => {
             let employeeName = "Unknown";
+            let employeeId = update.employeeId?.toString();
+            let employeeEmail = "";
             
             if (update.employeeName) {
               employeeName = update.employeeName;
-            } else if (update.employeeId) {
+            }
+            
+            if (update.employeeId) {
               try {
                 const employee = await db.collection("users").findOne({
                   _id: new ObjectId(update.employeeId),
                 });
                 if (employee) {
                   employeeName = employee.name || employee.email || "Unknown";
+                  employeeEmail = employee.email || "";
+                  employeeId = employee._id.toString();
                 }
               } catch (err) {
                 console.error("Error fetching employee:", err);
@@ -62,34 +97,74 @@ export async function GET(request: NextRequest) {
             }
 
             return {
+              employeeId,
+              employeeName,
+              employeeEmail,
               date: update.date || update.createdAt,
               hoursWorked: update.hoursWorked || 0,
+              progress: update.progress || 0,
               tasksCompleted: update.tasksCompleted || [],
               notes: update.notes || update.additionalNotes || "",
               challenges: update.challenges || "",
               nextSteps: update.nextSteps || "",
-              employeeName,
             };
           })
         );
 
-        // Populate lead assignee details
-        let leadAssignee = null;
+        // Populate lead assignee details (support both single and array)
+        let leadAssignees = [];
         if (project.leadAssignee) {
           try {
-            const leadId =
-              project.leadAssignee instanceof ObjectId
-                ? project.leadAssignee
-                : new ObjectId(project.leadAssignee);
-            const lead = await db.collection("users").findOne({ _id: leadId });
-            if (lead) {
-              leadAssignee = {
-                name: lead.name || lead.email,
-                email: lead.email,
-              };
+            if (Array.isArray(project.leadAssignee)) {
+              leadAssignees = await Promise.all(
+                project.leadAssignee.map(async (leadId: any) => {
+                  const id = leadId instanceof ObjectId ? leadId : new ObjectId(leadId);
+                  const lead = await db.collection("users").findOne({ _id: id });
+                  return lead ? {
+                    _id: lead._id.toString(),
+                    name: lead.name || lead.email,
+                    email: lead.email,
+                  } : null;
+                })
+              );
+              leadAssignees = leadAssignees.filter(Boolean);
+            } else {
+              const leadId =
+                project.leadAssignee instanceof ObjectId
+                  ? project.leadAssignee
+                  : new ObjectId(project.leadAssignee);
+              const lead = await db.collection("users").findOne({ _id: leadId });
+              if (lead) {
+                leadAssignees = [{
+                  _id: lead._id.toString(),
+                  name: lead.name || lead.email,
+                  email: lead.email,
+                }];
+              }
             }
           } catch (err) {
             console.error("Error fetching lead assignee:", err);
+          }
+        }
+
+        // Populate all assignees
+        let assignees = [];
+        if (project.assignees && Array.isArray(project.assignees)) {
+          try {
+            assignees = await Promise.all(
+              project.assignees.map(async (assigneeId: any) => {
+                const id = assigneeId instanceof ObjectId ? assigneeId : new ObjectId(assigneeId);
+                const employee = await db.collection("users").findOne({ _id: id });
+                return employee ? {
+                  _id: employee._id.toString(),
+                  name: employee.name || employee.email,
+                  email: employee.email,
+                } : null;
+              })
+            );
+            assignees = assignees.filter(Boolean);
+          } catch (err) {
+            console.error("Error fetching assignees:", err);
           }
         }
 
@@ -98,7 +173,8 @@ export async function GET(request: NextRequest) {
           projectName: project.projectName,
           clientName: project.clientName,
           status: project.status || "pending_assignment",
-          leadAssignee,
+          leadAssignees,
+          assignees,
           updates: populatedUpdates,
         };
       })

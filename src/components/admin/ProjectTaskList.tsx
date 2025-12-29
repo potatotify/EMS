@@ -67,6 +67,7 @@ interface Task {
     email: string;
   };
   tickedAt?: string;
+  timeSpent?: number; // Time spent on task in hours
   order: number;
   assigneeNames?: string[]; // For display/grouping
   customFields?: Array<{
@@ -94,6 +95,7 @@ interface Project {
   _id: string;
   projectName: string;
   clientName: string;
+  clientProgress?: number;
   leadAssignee?: any | any[]; // Can be ObjectId, populated object, or array of both
   vaIncharge?: any; // Can be ObjectId or populated object
   updateIncharge?: any; // Can be ObjectId or populated object
@@ -776,8 +778,27 @@ export default function ProjectTaskList() {
                 onClick={() => handleProjectSelect(project._id)}
                 className="w-full text-left p-4 bg-white rounded-xl border border-neutral-200 hover:border-emerald-300 hover:shadow-md transition-all"
               >
-                <div className="font-semibold text-neutral-900">{project.projectName}</div>
-                <div className="text-sm text-neutral-500">{project.clientName}</div>
+                <div className="flex items-start justify-between mb-3">
+                  <div>
+                    <div className="font-semibold text-neutral-900">{project.projectName}</div>
+                    <div className="text-sm text-neutral-500">{project.clientName}</div>
+                  </div>
+                </div>
+                {project.clientProgress !== undefined ? (
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 bg-neutral-200 rounded-full h-2.5 overflow-hidden">
+                      <div
+                        className="bg-linear-to-r from-emerald-500 to-teal-600 h-full rounded-full transition-all duration-300"
+                        style={{width: `${project.clientProgress}%`}}
+                      />
+                    </div>
+                    <span className="text-xs font-semibold text-neutral-700 w-10 text-right">
+                      {project.clientProgress}%
+                    </span>
+                  </div>
+                ) : (
+                  <div className="text-xs text-neutral-400">Progress not set</div>
+                )}
               </button>
             ))}
           </div>
@@ -2347,6 +2368,12 @@ function TaskItem({
                 </div>
               );
             })()
+          )}
+          {task.timeSpent && task.status === "completed" && (
+            <div className="flex items-center gap-1 text-blue-600">
+              <Clock className="w-2.5 h-2.5" />
+              <span className="text-[9px] font-medium">{task.timeSpent}h spent</span>
+            </div>
           )}
           {(task.bonusPoints || 0) > 0 && (
             <span className="text-emerald-600 font-medium">+{task.bonusPoints}</span>

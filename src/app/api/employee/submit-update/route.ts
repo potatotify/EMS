@@ -26,29 +26,36 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 });
     }
 
-    // Verify user is a lead assignee (support both single and array)
+    // Verify user is assigned to this project (check assignees array)
     const userId = new ObjectId(session.user.id);
-    let isLeadAssignee = false;
+    let isAssignedToProject = false;
     
-    if (project.leadAssignee) {
+    // Check if user is in the assignees array
+    if (project.assignees && Array.isArray(project.assignees)) {
+      isAssignedToProject = project.assignees.some((assignee: any) => {
+        const assigneeId = typeof assignee === 'string' ? new ObjectId(assignee) : new ObjectId(assignee);
+        return assigneeId.equals(userId);
+      });
+    }
+    
+    // Also check lead assignees as they should also be able to submit
+    if (!isAssignedToProject && project.leadAssignee) {
       if (Array.isArray(project.leadAssignee)) {
-        // Check if user is in the array of lead assignees
-        isLeadAssignee = project.leadAssignee.some((lead: any) => {
+        isAssignedToProject = project.leadAssignee.some((lead: any) => {
           const leadId = typeof lead === 'string' ? new ObjectId(lead) : new ObjectId(lead);
           return leadId.equals(userId);
         });
       } else {
-        // Single lead assignee (legacy)
         const leadAssigneeId = typeof project.leadAssignee === 'string' 
           ? new ObjectId(project.leadAssignee) 
           : new ObjectId(project.leadAssignee);
-        isLeadAssignee = leadAssigneeId.equals(userId);
+        isAssignedToProject = leadAssigneeId.equals(userId);
       }
     }
 
-    if (!isLeadAssignee) {
+    if (!isAssignedToProject) {
       return NextResponse.json({ 
-        error: 'Only the lead assignee can submit daily project updates' 
+        error: 'Only employees assigned to this project can submit daily project updates' 
       }, { status: 403 });
     }
 

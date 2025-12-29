@@ -22,6 +22,7 @@ export async function PATCH(
     const body = await request.json();
     
     console.log(`[Task Update] Received request for task ${taskId}, body:`, JSON.stringify(body));
+    console.log(`[Task Update] Logged in user ID: ${session.user.id}, email: ${session.user.email}`);
 
     await dbConnect();
 
@@ -134,22 +135,33 @@ export async function PATCH(
         task.tickedAt = tickedTime;
         task.markModified("tickedAt"); // Explicitly mark as modified to ensure save
         
+        // Save time spent if provided
+        if (body.timeSpent !== undefined) {
+          task.timeSpent = body.timeSpent;
+          task.markModified("timeSpent"); // Explicitly mark as modified to ensure save
+        }
+        
         // Reset approval status when employee ticks task (needs re-approval)
         task.approvalStatus = "pending";
         task.approvedBy = undefined;
         task.approvedAt = undefined;
         
+        // Always update completedBy to current user (fixes issue where re-ticking doesn't update)
+        task.completedBy = new ObjectId(session.user.id);
+        task.markModified("completedBy");
+        
         if (!wasCompleted) {
-          // Only update completedAt and completedBy if transitioning from incomplete to complete
+          // Only update completedAt if transitioning from incomplete to complete
           task.completedAt = new Date();
-          task.completedBy = new ObjectId(session.user.id);
         }
         // If already completed, we still update tickedAt above to reflect latest tick time
       } else if (body.status !== "completed" && wasCompleted) {
         task.completedAt = undefined;
         task.completedBy = undefined;
         task.tickedAt = undefined; // Clear ticked time if unchecked
+        task.timeSpent = undefined; // Clear time spent when unchecking
         task.markModified("tickedAt"); // Mark as modified when clearing
+        task.markModified("timeSpent");
         // Clear custom field values when task is unchecked
         task.customFieldValues = undefined;
       }
@@ -204,7 +216,7 @@ export async function PATCH(
     
     // Log for debugging
     const savedTaskAny = savedTask as any;
-    console.log(`[Task Update] Task ${taskId} - Status: ${savedTask.status}, TickedAt: ${savedTask.tickedAt}, CompletedAt: ${savedTask.completedAt}, NotApplicable: ${savedTaskAny.notApplicable}`);
+    console.log(`[Task Update] Task ${taskId} - Status: ${savedTask.status}, TickedAt: ${savedTask.tickedAt}, CompletedAt: ${savedTask.completedAt}, TimeSpent: ${savedTaskAny.timeSpent}, NotApplicable: ${savedTaskAny.notApplicable}`);
 
     // Manually populate user references
     const client = await clientPromise;
@@ -281,6 +293,7 @@ export async function PATCH(
       createdBy: populatedCreatedBy,
       completedBy: populatedCompletedBy,
       notApplicable: taskObject.notApplicable || false, // Ensure field is included
+      timeSpent: taskObject.timeSpent, // Explicitly include timeSpent
     };
     
     return NextResponse.json({
