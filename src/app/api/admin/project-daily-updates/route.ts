@@ -112,7 +112,7 @@ export async function GET(request: NextRequest) {
         );
 
         // Populate lead assignee details (support both single and array)
-        let leadAssignees = [];
+        let leadAssignees: any[] = [];
         if (project.leadAssignee) {
           try {
             if (Array.isArray(project.leadAssignee)) {
@@ -148,7 +148,7 @@ export async function GET(request: NextRequest) {
         }
 
         // Populate all assignees
-        let assignees = [];
+        let assignees: any[] = [];
         if (project.assignees && Array.isArray(project.assignees)) {
           try {
             assignees = await Promise.all(
