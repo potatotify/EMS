@@ -22,6 +22,7 @@ import {
   Calendar,
   Folder,
   FileText,
+  Trash2,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import SubtaskModal from "@/components/admin/SubtaskModal";
@@ -70,6 +71,7 @@ interface Task {
   isNew?: boolean; // For notification purposes
   canTick?: boolean; // Whether employee can tick this task
   createdByEmployee?: boolean; // Whether task was created by an employee
+  createdBy?: string; // User ID of who created the task
   createdAt?: string | Date; // Task creation date
   notApplicable?: boolean; // If true, bonus/penalty points don't apply
   subtasks?: Subtask[];
@@ -433,6 +435,25 @@ function EmployeeProjectTasksContent() {
     } catch (error) {
       console.error("Error updating task:", error);
       alert("Failed to update task. Please try again.");
+    }
+  };
+
+  const handleDeleteTask = async (taskId: string) => {
+    try {
+      const response = await fetch(`/api/employee/tasks/${taskId}`, {
+        method: "DELETE",
+      });
+
+      if (response.ok) {
+        await fetchTasks(projectId!);
+      } else {
+        const errorData = await response.json();
+        console.error("Error deleting task:", errorData);
+        alert(errorData.error || "Failed to delete task. You can only delete tasks you created.");
+      }
+    } catch (error) {
+      console.error("Error deleting task:", error);
+      alert("Failed to delete task. Please try again.");
     }
   };
 
@@ -883,10 +904,12 @@ function EmployeeProjectTasksContent() {
                           onToggleComplete={() => handleToggleComplete(task)}
                           onToggleNotApplicable={() => handleToggleNotApplicable(task)}
                           onEdit={() => setEditingTask(task)}
+                          onDelete={() => handleDeleteTask(task._id)}
                           onTaskClick={() => handleTaskClick(task)}
                           getPriorityColor={getPriorityColor}
                           formatDate={formatDate}
                           isOverdue={isOverdue(task)}
+                          currentUserId={session?.user?.id}
                         />
                       )
                     ))}
@@ -1020,10 +1043,12 @@ function EmployeeProjectTasksContent() {
                           onToggleComplete={() => handleToggleComplete(task)}
                           onToggleNotApplicable={() => handleToggleNotApplicable(task)}
                           onEdit={() => setEditingTask(task)}
+                          onDelete={() => handleDeleteTask(task._id)}
                           onTaskClick={() => handleTaskClick(task)}
                           getPriorityColor={getPriorityColor}
                           formatDate={formatDate}
                           isOverdue={isOverdue(task)}
+                          currentUserId={session?.user?.id}
                         />
                       )
                     ))}
@@ -1363,19 +1388,23 @@ function TaskItem({
   onToggleComplete,
   onToggleNotApplicable,
   onEdit,
+  onDelete,
   onTaskClick,
   getPriorityColor,
   formatDate,
   isOverdue,
+  currentUserId,
 }: {
   task: Task;
   onToggleComplete: () => void;
   onToggleNotApplicable?: () => void;
   onEdit: () => void;
+  onDelete?: () => void;
   onTaskClick?: () => void;
   getPriorityColor: (priority: number) => string;
   formatDate: (date?: string) => string;
   isOverdue: boolean;
+  currentUserId?: string;
 }) {
   const isNotApplicable = Boolean((task as any).notApplicable);
   
@@ -1505,13 +1534,29 @@ function TaskItem({
           )}
         </div>
       </div>
-      <button
-        onClick={onEdit}
-        className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-neutral-100 rounded transition-all"
-        title="Edit task"
-      >
-        <Edit2 className="w-4 h-4 text-neutral-500" />
-      </button>
+      <div className="flex items-center gap-1">
+        <button
+          onClick={onEdit}
+          className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-neutral-100 rounded transition-all"
+          title="Edit task"
+        >
+          <Edit2 className="w-4 h-4 text-neutral-500" />
+        </button>
+        {onDelete && (task as any).createdBy && currentUserId && (task as any).createdBy === currentUserId && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (confirm('Are you sure you want to delete this task?')) {
+                onDelete();
+              }
+            }}
+            className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-red-50 text-red-500 hover:text-red-600 rounded transition-all"
+            title="Delete task (only tasks you created)"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        )}
+      </div>
     </motion.div>
   );
 }

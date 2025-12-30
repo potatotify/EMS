@@ -310,3 +310,60 @@ export async function PATCH(
     }, { status: 500 });
   }
 }
+
+// DELETE - Delete task (employee can only delete tasks they created)
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ taskId: string }> }
+) {
+  try {
+    const session = await getServerSession(authOptions);
+
+    if (!session) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    }
+
+    const { taskId } = await params;
+    
+    console.log(`[Task Delete] Received request for task ${taskId}`);
+    console.log(`[Task Delete] Logged in user ID: ${session.user.id}, email: ${session.user.email}`);
+
+    await dbConnect();
+
+    const task = await Task.findById(taskId);
+    if (!task) {
+      return NextResponse.json({ error: "Task not found" }, { status: 404 });
+    }
+
+    const taskAny = task as any;
+    const userId = session.user.id;
+
+    // Check if user created the task
+    const createdById = taskAny.createdBy instanceof ObjectId 
+      ? taskAny.createdBy.toString() 
+      : taskAny.createdBy.toString();
+    
+    if (createdById !== userId) {
+      return NextResponse.json({ 
+        error: "You can only delete tasks you created" 
+      }, { status: 403 });
+    }
+
+    // Delete the task
+    await Task.findByIdAndDelete(taskId);
+    
+    console.log(`[Task Delete] Task ${taskId} deleted successfully by user ${userId}`);
+
+    return NextResponse.json({
+      success: true,
+      message: "Task deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting task:", error);
+    const errorMessage = error instanceof Error ? error.message : "Internal server error";
+    return NextResponse.json({ 
+      error: "Internal server error", 
+      details: process.env.NODE_ENV === 'development' ? errorMessage : undefined 
+    }, { status: 500 });
+  }
+}

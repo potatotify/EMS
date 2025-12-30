@@ -11,9 +11,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
     
-    const { workDetails } = await request.json();
-    if (!workDetails || workDetails.trim() === '') {
-      return NextResponse.json({ error: 'Work details required' }, { status: 400 });
+    const { dailyUpdate, link } = await request.json();
+    if ((!dailyUpdate || dailyUpdate.trim() === '') && (!link || link.trim() === '')) {
+      return NextResponse.json({ error: 'Please provide either a daily update or a link' }, { status: 400 });
     }
 
     const client = await clientPromise;
@@ -31,12 +31,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Attendance already marked for today' }, { status: 400 });
     }
 
-    await db.collection('attendance').insertOne({
+    const attendanceData: any = {
       userId: new ObjectId(session.user.id),
       date: new Date(),
-      workDetails,
       createdAt: new Date(),
-    });
+    };
+
+    // Add optional fields if provided
+    if (dailyUpdate && dailyUpdate.trim() !== '') {
+      attendanceData.dailyUpdate = dailyUpdate.trim();
+    }
+    if (link && link.trim() !== '') {
+      attendanceData.link = link.trim();
+    }
+
+    await db.collection('attendance').insertOne(attendanceData);
 
     return NextResponse.json({ success: true, message: 'Attendance marked' });
   } catch (error) {

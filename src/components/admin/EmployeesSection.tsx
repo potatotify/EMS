@@ -26,11 +26,18 @@ export default function EmployeesSection() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [attendanceData, setAttendanceData] = useState<Record<string, AttendanceRecord[]>>({});
   const [monthlyAttendanceData, setMonthlyAttendanceData] = useState<Record<string, number>>({});
+  const [customDurationData, setCustomDurationData] = useState<Record<string, number>>({});
   const [hoursWorkedData, setHoursWorkedData] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string>(
+    new Date().toISOString().split("T")[0]
+  );
+  const [customStartDate, setCustomStartDate] = useState<string>(
+    new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split("T")[0]
+  );
+  const [customEndDate, setCustomEndDate] = useState<string>(
     new Date().toISOString().split("T")[0]
   );
 
@@ -45,6 +52,12 @@ export default function EmployeesSection() {
       fetchHoursWorked();
     }
   }, [employees, selectedDate]);
+
+  useEffect(() => {
+    if (employees.length > 0) {
+      fetchCustomDurationAttendance();
+    }
+  }, [employees, customStartDate, customEndDate]);
 
   const fetchEmployees = async () => {
     setLoading(true);
@@ -154,6 +167,43 @@ export default function EmployeesSection() {
     }
   };
 
+  const fetchCustomDurationAttendance = async () => {
+    if (employees.length === 0 || !customStartDate || !customEndDate) return;
+    
+    try {
+      const startDate = new Date(customStartDate);
+      startDate.setHours(0, 0, 0, 0);
+      const endDate = new Date(customEndDate);
+      endDate.setHours(23, 59, 59, 999);
+
+      const attendancePromises = employees.map(async (emp) => {
+        try {
+          const response = await fetch(`/api/admin/employee/${emp._id}`);
+          const data = await response.json();
+          if (response.ok && data.attendanceRecords) {
+            const customCount = data.attendanceRecords.filter((record: AttendanceRecord) => {
+              const recordDate = new Date(record.date);
+              return recordDate >= startDate && recordDate <= endDate;
+            }).length;
+            return {employeeId: emp._id, count: customCount};
+          }
+        } catch (error) {
+          console.error(`Error fetching custom duration attendance for ${emp._id}:`, error);
+        }
+        return {employeeId: emp._id, count: 0};
+      });
+
+      const results = await Promise.all(attendancePromises);
+      const customCountMap: Record<string, number> = {};
+      results.forEach((result) => {
+        customCountMap[result.employeeId] = result.count;
+      });
+      setCustomDurationData(customCountMap);
+    } catch (error) {
+      console.error("Error fetching custom duration attendance:", error);
+    }
+  };
+
   const filteredEmployees = employees.filter((emp) =>
     emp.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
     emp.email.toLowerCase().includes(searchTerm.toLowerCase())
@@ -181,38 +231,80 @@ export default function EmployeesSection() {
   return (
     <div className="space-y-6">
       {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
-        <div className="relative flex-1 w-full sm:max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Search employees by name or email..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white text-gray-900 placeholder-gray-500"
-          />
-        </div>
-        <div className="flex items-center gap-3">
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">
-              View Date
-            </label>
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
+          <div className="relative flex-1 w-full sm:max-w-md">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
             <input
-              type="date"
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm"
+              type="text"
+              placeholder="Search employees by name or email..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white text-gray-900 placeholder-gray-500"
             />
           </div>
-          <motion.button
-            whileHover={{scale: 1.05}}
-            whileTap={{scale: 0.95}}
-            onClick={fetchEmployees}
-            className="inline-flex items-center gap-2 px-4 py-2 gradient-emerald text-white rounded-xl text-sm font-semibold transition-all shadow-md hover:shadow-lg mt-6"
-          >
-            <RefreshCw className="w-4 h-4" />
-            Refresh
-          </motion.button>
+          <div className="flex items-center gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">
+                View Date
+              </label>
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm"
+              />
+            </div>
+            <motion.button
+              whileHover={{scale: 1.05}}
+              whileTap={{scale: 0.95}}
+              onClick={fetchEmployees}
+              className="inline-flex items-center gap-2 px-4 py-2 gradient-emerald text-white rounded-xl text-sm font-semibold transition-all shadow-md hover:shadow-lg mt-6"
+            >
+              <RefreshCw className="w-4 h-4" />
+              Refresh
+            </motion.button>
+          </div>
+        </div>
+
+        {/* Custom Duration Filter */}
+        <div className="bg-linear-to-r from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-200">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+            <div className="flex items-center gap-2">
+              <Calendar className="w-5 h-5 text-blue-600" />
+              <span className="text-sm font-semibold text-gray-900">Custom Duration:</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  Start Date
+                </label>
+                <input
+                  type="date"
+                  value={customStartDate}
+                  onChange={(e) => setCustomStartDate(e.target.value)}
+                  className="px-3 py-2 border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm bg-white"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  End Date
+                </label>
+                <input
+                  type="date"
+                  value={customEndDate}
+                  onChange={(e) => setCustomEndDate(e.target.value)}
+                  className="px-3 py-2 border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm bg-white"
+                />
+              </div>
+              <div className="bg-white px-3 py-2 rounded-lg border border-blue-300 mt-5">
+                <span className="text-xs text-gray-600">Duration: </span>
+                <span className="text-sm font-semibold text-blue-900">
+                  {Math.ceil((new Date(customEndDate).getTime() - new Date(customStartDate).getTime()) / (1000 * 60 * 60 * 24)) + 1} days
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -229,13 +321,13 @@ export default function EmployeesSection() {
                   This Month's Attendance
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
+                  Custom Duration
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
                   Hours Worked
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
                   Attendance Status
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
-                  Work Details
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
                   Actions
@@ -280,6 +372,14 @@ export default function EmployeesSection() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
+                          <Calendar className="w-4 h-4 text-blue-600" />
+                          <span className="text-sm font-semibold text-blue-900">
+                            {customDurationData[employee._id] || 0} days
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
                           <Clock className="w-4 h-4 text-blue-500" />
                           <span className="text-sm font-semibold text-blue-900" title={`User ID: ${employee.userId}, Hours: ${hoursWorkedData[employee.userId] || 0}`}>
                             {(hoursWorkedData[employee.userId] || 0).toFixed(1)}h
@@ -297,15 +397,6 @@ export default function EmployeesSection() {
                             <XCircle className="w-5 h-5 text-red-600" />
                             <span className="text-sm font-medium text-red-700">Absent</span>
                           </div>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-600 max-w-md">
-                        {attendance.record?.workDetails ? (
-                          <p className="truncate" title={attendance.record.workDetails}>
-                            {attendance.record.workDetails}
-                          </p>
-                        ) : (
-                          <span className="text-gray-400">No details</span>
                         )}
                       </td>
                       <td className="px-4 py-3">

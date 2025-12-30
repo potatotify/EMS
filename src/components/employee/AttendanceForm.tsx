@@ -13,14 +13,15 @@ export default function AttendanceModal({
   onClose,
   onSuccess
 }: AttendanceModalProps) {
-  const [workDetails, setWorkDetails] = useState("");
+  const [dailyUpdate, setDailyUpdate] = useState("");
+  const [link, setLink] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!workDetails.trim()) {
-      setMessage("Please enter what work you did today.");
+    if (!dailyUpdate.trim() && !link.trim()) {
+      setMessage("Please provide either a daily update or a link.");
       return;
     }
 
@@ -31,7 +32,10 @@ export default function AttendanceModal({
       const response = await fetch("/api/employee/attendance", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({workDetails})
+        body: JSON.stringify({
+          dailyUpdate: dailyUpdate.trim(),
+          link: link.trim()
+        })
       });
 
       const data = await response.json();
@@ -90,14 +94,35 @@ export default function AttendanceModal({
             </motion.div>
           )}
           <form onSubmit={handleSubmit}>
-            <textarea
-              value={workDetails}
-              onChange={(e) => setWorkDetails(e.target.value)}
-              rows={5}
-              placeholder="Describe what work you did today..."
-              className="w-full p-3 border border-gray-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-              disabled={loading}
-            />
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Daily Update <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  value={dailyUpdate}
+                  onChange={(e) => setDailyUpdate(e.target.value)}
+                  rows={5}
+                  placeholder="Share your daily progress, achievements, or challenges..."
+                  className="w-full p-3 border border-gray-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  disabled={loading}
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Related Link (Optional)
+                </label>
+                <input
+                  type="url"
+                  value={link}
+                  onChange={(e) => setLink(e.target.value)}
+                  placeholder="https://example.com/project-link"
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  disabled={loading}
+                />
+              </div>
+            </div>
             <div className="flex gap-3 mt-4">
               <button
                 type="button"

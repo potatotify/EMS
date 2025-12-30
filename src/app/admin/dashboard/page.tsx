@@ -25,6 +25,7 @@ import {
   ChevronRight,
   Building2,
   Briefcase,
+  CalendarDays,
 } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -48,6 +49,7 @@ import BonusPointsSheet from "@/components/admin/BonusPointsSheet";
 import ClientsTable from "@/components/admin/ClientsTable";
 import EmployeeProjectsTable from "@/components/admin/EmployeeProjectsTable";
 import ProjectDailyUpdatesTable from "@/components/admin/ProjectDailyUpdatesTable";
+import EmployeeDailyUpdatesTable from "@/components/admin/EmployeeDailyUpdatesTable";
 
 interface PendingEmployee {
   _id: string;
@@ -73,6 +75,7 @@ type SectionType =
   | "projects"
   | "project-daily-updates"
   | "daily-updates"
+  | "employee-daily-updates"
   | "pending-approvals"
   | "employees"
   | "hackathons"
@@ -242,6 +245,11 @@ export default function AdminDashboard() {
       icon: <TrendingUp className="w-5 h-5" />
     },
     {
+      id: "employee-daily-updates",
+      title: "Employee Daily Updates",
+      icon: <CalendarDays className="w-5 h-5" />
+    },
+    {
       id: "pending-approvals",
       title: "Pending Approvals",
       icon: <UserCheck className="w-5 h-5" />,
@@ -289,6 +297,8 @@ export default function AdminDashboard() {
         return <ProjectDailyUpdatesTable />;
       case "daily-updates":
         return <DailyUpdatesReview />;
+      case "employee-daily-updates":
+        return <EmployeeDailyUpdatesTable />;
       case "pending-approvals":
         return (
           <div className="space-y-4">
@@ -471,7 +481,7 @@ export default function AdminDashboard() {
         <main className="flex-1 overflow-y-auto bg-neutral-50/50">
           <div className={`${activeSection === "project-tasks" ? "w-full p-0" : "max-w-[1920px] mx-auto p-6 lg:p-8"}`}>
             {/* Section Header - Hidden for project-tasks */}
-            {activeSection !== "project-tasks" && activeSection !== "bonus-summary" && activeSection !== "daily-updates" && activeSection !== "project-daily-updates" && activeSection !== "task-analysis" && activeSection !== "hackathons" && activeSection !== "checklist-settings" && activeSection !== "employee-permissions" && activeSection !== "clients" && activeSection !== "employee-projects" && (
+            {activeSection !== "project-tasks" && activeSection !== "bonus-summary" && activeSection !== "daily-updates" && activeSection !== "project-daily-updates" && activeSection !== "task-analysis" && activeSection !== "hackathons" && activeSection !== "checklist-settings" && activeSection !== "employee-permissions" && activeSection !== "clients" && activeSection !== "employee-projects" && activeSection !== "employee-daily-updates" && (
               <motion.div
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}

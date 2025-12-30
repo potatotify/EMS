@@ -20,6 +20,8 @@ import {
   FileText,
   StickyNote,
   Calendar,
+  Trash2,
+  Edit2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -49,6 +51,7 @@ interface Task {
   priority: number;
   status: TaskStatus;
   order: number;
+  createdBy?: string; // User ID of who created the task
   createdAt?: string | Date;
   notApplicable?: boolean; // If true, bonus/penalty points don't apply
   timeSpent?: number; // Time spent on task in hours
@@ -454,6 +457,25 @@ export default function AllTasksPage() {
     } catch (error) {
       console.error("Error updating task:", error);
       alert("Failed to update task. Please try again.");
+    }
+  };
+
+  const handleDeleteTask = async (taskId: string) => {
+    try {
+      const response = await fetch(`/api/employee/tasks/${taskId}`, {
+        method: "DELETE",
+      });
+
+      if (response.ok) {
+        await fetchAllTasks();
+      } else {
+        const errorData = await response.json();
+        console.error("Error deleting task:", errorData);
+        alert(errorData.error || "Failed to delete task. You can only delete tasks you created.");
+      }
+    } catch (error) {
+      console.error("Error deleting task:", error);
+      alert("Failed to delete task. Please try again.");
     }
   };
 
@@ -1371,7 +1393,7 @@ export default function AllTasksPage() {
                               key={task._id}
                               initial={{ opacity: 0, y: -10 }}
                               animate={{ opacity: 1, y: 0 }}
-                              className="bg-white rounded-lg border border-neutral-200 p-3 hover:shadow-md transition-shadow cursor-pointer"
+                              className="bg-white rounded-lg border border-neutral-200 p-3 hover:shadow-md transition-shadow cursor-pointer group"
                               onClick={() => handleToggleComplete(task)}
                             >
                               <div className="flex items-start gap-2 min-w-0">
@@ -1470,6 +1492,33 @@ export default function AllTasksPage() {
                                     )}
                                   </div>
                                 </div>
+                                {/* Edit and Delete buttons - only show if user created the task */}
+                                {(task as any).createdBy && session?.user?.id && (task as any).createdBy === session.user.id && (
+                                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        alert('Edit functionality coming soon');
+                                      }}
+                                      className="p-1.5 hover:bg-neutral-100 rounded transition-all"
+                                      title="Edit task"
+                                    >
+                                      <Edit2 className="w-4 h-4 text-neutral-500" />
+                                    </button>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (confirm('Are you sure you want to delete this task?')) {
+                                          handleDeleteTask(task._id);
+                                        }
+                                      }}
+                                      className="p-1.5 hover:bg-red-50 text-red-500 hover:text-red-600 rounded transition-all"
+                                      title="Delete task"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                )}
                               </div>
                             </motion.div>
                           ))}
@@ -1512,7 +1561,7 @@ export default function AllTasksPage() {
                             key={task._id}
                             initial={{ opacity: 0, x: -10 }}
                             animate={{ opacity: 1, x: 0 }}
-                            className="bg-white rounded-lg border border-neutral-200 p-4 hover:shadow-md transition-shadow cursor-pointer"
+                            className="bg-white rounded-lg border border-neutral-200 p-4 hover:shadow-md transition-shadow cursor-pointer group"
                             onClick={() => handleToggleComplete(task)}
                           >
                             <div className="flex items-start gap-2 min-w-0">
@@ -1581,6 +1630,33 @@ export default function AllTasksPage() {
                                   )}
                                 </div>
                               </div>
+                              {/* Edit and Delete buttons - only show if user created the task */}
+                              {(task as any).createdBy && session?.user?.id && (task as any).createdBy === session.user.id && (
+                                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      alert('Edit functionality coming soon');
+                                    }}
+                                    className="p-1.5 hover:bg-neutral-100 rounded transition-all"
+                                    title="Edit task"
+                                  >
+                                    <Edit2 className="w-4 h-4 text-neutral-500" />
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (confirm('Are you sure you want to delete this task?')) {
+                                        handleDeleteTask(task._id);
+                                      }
+                                    }}
+                                    className="p-1.5 hover:bg-red-50 text-red-500 hover:text-red-600 rounded transition-all"
+                                    title="Delete task"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           </motion.div>
                         ))}
