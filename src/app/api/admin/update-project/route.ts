@@ -48,7 +48,16 @@ export async function POST(request: NextRequest) {
     }
     
     // Note: leadAssignee should be updated via /api/admin/assign-project endpoint
-    if (data.vaIncharge !== undefined) updateData.vaIncharge = data.vaIncharge;
+    if (data.vaIncharge !== undefined) {
+      // Handle vaIncharge as array or single
+      if (Array.isArray(data.vaIncharge)) {
+        updateData.vaIncharge = data.vaIncharge.map((id: string) => new ObjectId(id));
+      } else if (data.vaIncharge) {
+        updateData.vaIncharge = new ObjectId(data.vaIncharge);
+      } else {
+        updateData.vaIncharge = null;
+      }
+    }
     if (data.freelancer !== undefined) updateData.freelancer = data.freelancer;
     if (data.updateIncharge !== undefined) updateData.updateIncharge = data.updateIncharge;
     if (data.codersRecommendation !== undefined) updateData.codersRecommendation = data.codersRecommendation;

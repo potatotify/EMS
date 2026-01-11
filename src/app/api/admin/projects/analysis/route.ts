@@ -84,30 +84,42 @@ export async function GET() {
         }
       }
 
-      // Get VA incharge details
+      // Get VA incharge details (can be array or single)
       let vaIncharge = null;
       if (project.vaIncharge) {
         try {
-          // Handle different types: ObjectId, string, or FlattenMaps<ObjectId>
-          let vaId: ObjectId;
-          if (project.vaIncharge instanceof ObjectId) {
-            vaId = project.vaIncharge;
-          } else if (typeof project.vaIncharge === 'string') {
-            vaId = new ObjectId(project.vaIncharge);
-          } else {
-            vaId = new ObjectId(String(project.vaIncharge));
-          }
-          const vaUser = await db.collection('users').findOne({
-            _id: vaId
-          });
-          const vaProfile = await db.collection('employeeProfiles').findOne({
-            userId: vaId
-          });
-          if (vaUser) {
-            vaIncharge = {
-              name: vaProfile?.fullName || vaUser.name || 'Unknown',
-              email: vaUser.email || ''
-            };
+          const vaList = Array.isArray(project.vaIncharge) ? project.vaIncharge : [project.vaIncharge];
+          const vaDetails = await Promise.all(
+            vaList.map(async (vaItem: any) => {
+              // Handle different types: ObjectId, string, or FlattenMaps<ObjectId>
+              let vaId: ObjectId;
+              if (vaItem instanceof ObjectId) {
+                vaId = vaItem;
+              } else if (typeof vaItem === 'string') {
+                vaId = new ObjectId(vaItem);
+              } else if (vaItem._id) {
+                vaId = new ObjectId(vaItem._id);
+              } else {
+                vaId = new ObjectId(String(vaItem));
+              }
+              const vaUser = await db.collection('users').findOne({
+                _id: vaId
+              });
+              const vaProfile = await db.collection('employeeProfiles').findOne({
+                userId: vaId
+              });
+              if (vaUser) {
+                return {
+                  name: vaProfile?.fullName || vaUser.name || 'Unknown',
+                  email: vaUser.email || ''
+                };
+              }
+              return null;
+            })
+          );
+          const validVaDetails = vaDetails.filter(va => va !== null);
+          if (validVaDetails.length > 0) {
+            vaIncharge = validVaDetails.length === 1 ? validVaDetails[0] : validVaDetails;
           }
         } catch (e) {
           console.error('Error fetching VA incharge:', e);

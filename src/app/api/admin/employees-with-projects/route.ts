@@ -46,10 +46,22 @@ export async function GET(request: NextRequest) {
       
       const employeeProjects = projects
         .filter(p => {
-          // Check if employee is leadAssignee
-          if (p.leadAssignee && p.leadAssignee.toString() === employeeId) return true;
-          // Check if employee is vaIncharge
-          if (p.vaIncharge && p.vaIncharge.toString() === employeeId) return true;
+          // Check if employee is leadAssignee (can be array or single)
+          if (p.leadAssignee) {
+            if (Array.isArray(p.leadAssignee)) {
+              if (p.leadAssignee.some((lead: any) => lead.toString() === employeeId)) return true;
+            } else {
+              if (p.leadAssignee.toString() === employeeId) return true;
+            }
+          }
+          // Check if employee is vaIncharge (can be array or single)
+          if (p.vaIncharge) {
+            if (Array.isArray(p.vaIncharge)) {
+              if (p.vaIncharge.some((va: any) => va.toString() === employeeId)) return true;
+            } else {
+              if (p.vaIncharge.toString() === employeeId) return true;
+            }
+          }
           // Check if employee is in assignees array
           if (p.assignees && Array.isArray(p.assignees)) {
             return p.assignees.some((a: any) => a.toString() === employeeId);
@@ -58,10 +70,29 @@ export async function GET(request: NextRequest) {
         })
         .map(p => {
           let role = 'Team Member';
-          if (p.leadAssignee && p.leadAssignee.toString() === employeeId) {
-            role = 'Lead Assignee';
-          } else if (p.vaIncharge && p.vaIncharge.toString() === employeeId) {
-            role = 'VA Incharge';
+          // Check leadAssignee (can be array or single)
+          if (p.leadAssignee) {
+            if (Array.isArray(p.leadAssignee)) {
+              if (p.leadAssignee.some((lead: any) => lead.toString() === employeeId)) {
+                role = 'Lead Assignee';
+              }
+            } else {
+              if (p.leadAssignee.toString() === employeeId) {
+                role = 'Lead Assignee';
+              }
+            }
+          }
+          // Check vaIncharge (can be array or single) - only if not already Lead Assignee
+          if (role === 'Team Member' && p.vaIncharge) {
+            if (Array.isArray(p.vaIncharge)) {
+              if (p.vaIncharge.some((va: any) => va.toString() === employeeId)) {
+                role = 'VA Incharge';
+              }
+            } else {
+              if (p.vaIncharge.toString() === employeeId) {
+                role = 'VA Incharge';
+              }
+            }
           }
 
           return {

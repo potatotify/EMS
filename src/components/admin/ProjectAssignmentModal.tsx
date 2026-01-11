@@ -42,7 +42,7 @@ export default function ProjectAssignmentModal({ project, onClose, onSuccess, is
   const [skillFilter, setSkillFilter] = useState('');
   const [formData, setFormData] = useState({
     leadAssignees: [] as string[], // Changed from single to array
-    vaIncharge: '',
+    vaIncharge: [] as string[], // Changed from single to array
     freelancer: '',
     assignees: [] as string[],
     codersRecommendation: '',
@@ -83,9 +83,24 @@ export default function ProjectAssignmentModal({ project, onClose, onSuccess, is
         }
       }
       
+      // Handle vaIncharge (can be single or array)
+      let vaInchargeIds: string[] = [];
+      if (project.vaIncharge) {
+        if (Array.isArray(project.vaIncharge)) {
+          vaInchargeIds = project.vaIncharge.map((va: any) =>
+            typeof va === 'object' && va._id ? va._id.toString() : va.toString()
+          );
+        } else {
+          const vaId = typeof project.vaIncharge === 'object' && project.vaIncharge._id
+            ? project.vaIncharge._id.toString()
+            : project.vaIncharge.toString();
+          vaInchargeIds = [vaId];
+        }
+      }
+      
       setFormData({
         leadAssignees: leadAssigneeIds,
-        vaIncharge: project.vaIncharge?._id || project.vaIncharge || '',
+        vaIncharge: vaInchargeIds,
         assignees: assigneeIds,
         freelancer: project.freelancer || '',
         codersRecommendation: project.codersRecommendation || '',
@@ -142,6 +157,18 @@ export default function ProjectAssignmentModal({ project, onClose, onSuccess, is
     // Validate at least one lead assignee is selected
     if (formData.leadAssignees.length === 0) {
       alert('Please select at least one lead assignee');
+      return;
+    }
+    
+    // Validate no person is in multiple roles
+    const allSelectedIds = new Set([
+      ...formData.leadAssignees,
+      ...formData.vaIncharge,
+      ...formData.assignees
+    ]);
+    
+    if (allSelectedIds.size !== (formData.leadAssignees.length + formData.vaIncharge.length + formData.assignees.length)) {
+      alert('A person can only be assigned to one role at a time (Lead Assignee, VA Incharge, or Assignee). Please remove duplicates.');
       return;
     }
     
@@ -202,29 +229,34 @@ export default function ProjectAssignmentModal({ project, onClose, onSuccess, is
               Lead Assignees <span className="text-red-500">*</span>
             </label>
             <div className="border border-gray-300 rounded-lg p-2 max-h-48 overflow-y-auto bg-white">
-              {getFilteredEmployees().map((emp) => (
-                <label key={emp._id} className="flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formData.leadAssignees.includes(emp._id)}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setFormData({ ...formData, leadAssignees: [...formData.leadAssignees, emp._id] });
-                      } else {
-                        setFormData({ ...formData, leadAssignees: formData.leadAssignees.filter(id => id !== emp._id) });
-                      }
-                    }}
-                    className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
-                  />
-                  <span className="text-sm text-gray-700">
-                    {emp.name} ({emp.email}
-                    {emp.skills && emp.skills.length > 0
-                      ? ` - ${emp.skills.join(', ')}`
-                      : ''}
-                    )
-                  </span>
-                </label>
-              ))}
+              {getFilteredEmployees().map((emp) => {
+                const isInOtherRole = formData.vaIncharge.includes(emp._id) || formData.assignees.includes(emp._id);
+                return (
+                  <label key={emp._id} className={`flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer ${isInOtherRole ? 'opacity-50' : ''}`}>
+                    <input
+                      type="checkbox"
+                      checked={formData.leadAssignees.includes(emp._id)}
+                      disabled={isInOtherRole}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setFormData({ ...formData, leadAssignees: [...formData.leadAssignees, emp._id] });
+                        } else {
+                          setFormData({ ...formData, leadAssignees: formData.leadAssignees.filter(id => id !== emp._id) });
+                        }
+                      }}
+                      className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span className="text-sm text-gray-700">
+                      {emp.name} ({emp.email}
+                      {emp.skills && emp.skills.length > 0
+                        ? ` - ${emp.skills.join(', ')}`
+                        : ''}
+                      )
+                      {isInOtherRole && <span className="text-red-500 text-xs ml-1">(Already assigned)</span>}
+                    </span>
+                  </label>
+                );
+              })}
             </div>
             {formData.leadAssignees.length > 0 && (
               <p className="mt-2 text-xs text-gray-500">
@@ -241,52 +273,76 @@ export default function ProjectAssignmentModal({ project, onClose, onSuccess, is
           {/* Grid for other fields */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">VA Incharge</label>
-              <select
-                value={formData.vaIncharge}
-                onChange={(e) => setFormData({ ...formData, vaIncharge: e.target.value })}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-              >
-                <option value="">Select employee</option>
-                {getFilteredEmployees().map((emp) => (
-                  <option key={emp._id} value={emp._id}>
-                    {emp.name} ({emp.email}
-                    {emp.skills && emp.skills.length > 0
-                      ? ` - ${emp.skills.join(', ')}`
-                      : ''}
-                    )
-                  </option>
-                ))}
-              </select>
+              <label className="block text-sm font-medium text-gray-700 mb-2">VA Incharge (Multiple)</label>
+              <div className="border border-gray-300 rounded-lg p-2 max-h-48 overflow-y-auto bg-white">
+                {getFilteredEmployees().map((emp) => {
+                  const isInOtherRole = formData.leadAssignees.includes(emp._id) || formData.assignees.includes(emp._id);
+                  return (
+                    <label key={emp._id} className={`flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer ${isInOtherRole ? 'opacity-50' : ''}`}>
+                      <input
+                        type="checkbox"
+                        checked={formData.vaIncharge.includes(emp._id)}
+                        disabled={isInOtherRole}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setFormData({ ...formData, vaIncharge: [...formData.vaIncharge, emp._id] });
+                          } else {
+                            setFormData({ ...formData, vaIncharge: formData.vaIncharge.filter(id => id !== emp._id) });
+                          }
+                        }}
+                        className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <span className="text-sm text-gray-700">
+                        {emp.name} ({emp.email}
+                        {emp.skills && emp.skills.length > 0
+                          ? ` - ${emp.skills.join(', ')}`
+                          : ''}
+                        )
+                        {isInOtherRole && <span className="text-red-500 text-xs ml-1">(Already assigned)</span>}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+              {formData.vaIncharge.length > 0 && (
+                <p className="mt-2 text-xs text-gray-500">
+                  {formData.vaIncharge.length} VA {formData.vaIncharge.length === 1 ? 'incharge' : 'incharges'} selected
+                </p>
+              )}
             </div>
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Assignees (Multiple employees can be assigned to this project)
               </label>
               <div className="border border-gray-300 rounded-lg p-2 max-h-48 overflow-y-auto">
-                {getFilteredEmployees().map((emp) => (
-                  <label key={emp._id} className="flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={formData.assignees.includes(emp._id)}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setFormData({ ...formData, assignees: [...formData.assignees, emp._id] });
-                        } else {
-                          setFormData({ ...formData, assignees: formData.assignees.filter(id => id !== emp._id) });
-                        }
-                      }}
-                      className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
-                    />
-                    <span className="text-sm text-gray-700">
-                      {emp.name} ({emp.email}
-                      {emp.skills && emp.skills.length > 0
-                        ? ` - ${emp.skills.join(', ')}`
-                        : ''}
-                      )
-                    </span>
-                  </label>
-                ))}
+                {getFilteredEmployees().map((emp) => {
+                  const isInOtherRole = formData.leadAssignees.includes(emp._id) || formData.vaIncharge.includes(emp._id);
+                  return (
+                    <label key={emp._id} className={`flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer ${isInOtherRole ? 'opacity-50' : ''}`}>
+                      <input
+                        type="checkbox"
+                        checked={formData.assignees.includes(emp._id)}
+                        disabled={isInOtherRole}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setFormData({ ...formData, assignees: [...formData.assignees, emp._id] });
+                          } else {
+                            setFormData({ ...formData, assignees: formData.assignees.filter(id => id !== emp._id) });
+                          }
+                        }}
+                        className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <span className="text-sm text-gray-700">
+                        {emp.name} ({emp.email}
+                        {emp.skills && emp.skills.length > 0
+                          ? ` - ${emp.skills.join(', ')}`
+                          : ''}
+                        )
+                        {isInOtherRole && <span className="text-red-500 text-xs ml-1">(Already assigned)</span>}
+                      </span>
+                    </label>
+                  );
+                })}
               </div>
               {formData.assignees.length > 0 && (
                 <p className="mt-2 text-xs text-gray-500">

@@ -256,10 +256,19 @@ export default function ProjectTaskList() {
       const leadId = getAssigneeId(leadAssignee);
       if (leadId) assigneeIds.add(leadId);
     }
-    const vaId = getAssigneeId(project.vaIncharge);
+    // Handle vaIncharge (can be array or single)
+    if (project.vaIncharge) {
+      if (Array.isArray(project.vaIncharge)) {
+        project.vaIncharge.forEach((va: any) => {
+          const vaId = getAssigneeId(va);
+          if (vaId) assigneeIds.add(vaId);
+        });
+      } else {
+        const vaId = getAssigneeId(project.vaIncharge);
+        if (vaId) assigneeIds.add(vaId);
+      }
+    }
     const updateId = getAssigneeId(project.updateIncharge);
-
-    if (vaId) assigneeIds.add(vaId);
     if (updateId) assigneeIds.add(updateId);
 
     // Add all assignees from the assignees array
@@ -681,6 +690,37 @@ export default function ProjectTaskList() {
     return false;
   };
 
+  // Skeleton Loader Components
+  const TaskSkeleton = () => (
+    <div className="flex items-start gap-2 p-3 bg-white rounded-lg border border-neutral-200 shadow-sm animate-pulse">
+      <div className="shrink-0">
+        <div className="w-5 h-5 bg-neutral-200 rounded-full"></div>
+      </div>
+      <div className="flex-1 min-w-0 space-y-2">
+        <div className="h-4 bg-neutral-200 rounded w-3/4"></div>
+        <div className="h-3 bg-neutral-200 rounded w-1/2"></div>
+        <div className="flex items-center gap-2">
+          <div className="h-3 w-3 bg-neutral-200 rounded"></div>
+          <div className="h-3 w-16 bg-neutral-200 rounded"></div>
+          <div className="h-3 w-20 bg-neutral-200 rounded"></div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const SectionSkeleton = () => (
+    <div className="flex-shrink-0 w-80 min-w-[320px] bg-neutral-50 rounded-xl p-4 border border-neutral-200">
+      <div className="flex items-center justify-between mb-4">
+        <div className="h-5 bg-neutral-200 rounded w-24 animate-pulse"></div>
+      </div>
+      <div className="space-y-2">
+        <TaskSkeleton />
+        <TaskSkeleton />
+        <TaskSkeleton />
+      </div>
+    </div>
+  );
+
   const filteredTasks = (sectionTasks: Task[]) => {
     // Always show all tasks, including completed ones (they'll just be ticked)
     let filtered = [...sectionTasks];
@@ -984,7 +1024,17 @@ export default function ProjectTaskList() {
         </div>
       </div>
 
-      {viewMode === "board" && (
+      {viewMode === "board" && loading && (
+        <div className="w-full overflow-x-auto" style={{ scrollbarWidth: 'thin', WebkitOverflowScrolling: 'touch', scrollBehavior: 'smooth' }}>
+          <div className="inline-flex gap-1 pl-1 pr-2 py-2">
+            <SectionSkeleton />
+            <SectionSkeleton />
+            <SectionSkeleton />
+          </div>
+        </div>
+      )}
+
+      {viewMode === "board" && !loading && (
         <div className="w-full overflow-x-auto" style={{ scrollbarWidth: 'thin', WebkitOverflowScrolling: 'touch', scrollBehavior: 'smooth' }}>
           <div className="inline-flex gap-1 pl-1 pr-2 py-2">
             {sections.map((section) => {
@@ -1042,8 +1092,9 @@ export default function ProjectTaskList() {
             })}
 
             {/* Add Section Button */}
-            <div className="shrink-0">
-              {showSectionInput ? (
+            {!loading && (
+              <div className="shrink-0">
+                {showSectionInput ? (
                 <div className="w-72 p-2 bg-white rounded-lg border border-neutral-200 shadow-sm">
                   <input
                     type="text"
@@ -1087,12 +1138,27 @@ export default function ProjectTaskList() {
                   <span className="text-sm font-medium">Add section</span>
                 </button>
               )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {viewMode === "list" && loading && (
+        <div className="max-w-7xl mx-auto p-6 space-y-6">
+          <div className="mb-8">
+            <div className="h-6 bg-neutral-200 rounded w-48 animate-pulse mb-4"></div>
+            <div className="space-y-2">
+              <TaskSkeleton />
+              <TaskSkeleton />
+              <TaskSkeleton />
+              <TaskSkeleton />
             </div>
           </div>
         </div>
       )}
 
-      {viewMode === "list" && (
+      {viewMode === "list" && !loading && (
         <div className="flex max-w-7xl mx-auto">
           <div className="flex-1 p-2">
             {sections.map((section) => {
@@ -1157,7 +1223,7 @@ export default function ProjectTaskList() {
             })}
 
             {/* Add Section - Only show in List view */}
-            {viewMode === "list" && (
+            {viewMode === "list" && !loading && (
               <>
                 {showSectionInput ? (
                   <div className="mb-3 p-2 bg-white rounded-lg border border-neutral-200 shadow-sm">
@@ -1228,9 +1294,6 @@ export default function ProjectTaskList() {
         </div>
       )}
 
-      {loading && (
-        <div className="text-center py-12 text-neutral-400">Loading tasks...</div>
-      )}
 
       {/* Subtask Modal */}
       {showSubtaskModal && selectedTaskForSubtasks && selectedProject && (

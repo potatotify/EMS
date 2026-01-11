@@ -357,8 +357,22 @@ export default function AdminMessagesPanel() {
           {/* Messages */}
           <div className="bg-white rounded-xl shadow-sm border border-neutral-200 overflow-hidden">
             {loadingMessages ? (
-              <div className="flex items-center justify-center py-16">
-                <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
+              <div className="divide-y divide-neutral-100 max-h-[600px] overflow-y-auto">
+                {[1, 2, 3, 4, 5].map((i) => (
+                  <div key={i} className="p-4 animate-pulse">
+                    <div className="flex items-start gap-4">
+                      <div className="w-10 h-10 bg-neutral-200 rounded-full"></div>
+                      <div className="flex-1 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="h-4 bg-neutral-200 rounded w-32"></div>
+                          <div className="h-3 bg-neutral-200 rounded w-20"></div>
+                        </div>
+                        <div className="h-3 bg-neutral-200 rounded w-48"></div>
+                        <div className="h-3 bg-neutral-200 rounded w-full"></div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             ) : filteredMessages.length === 0 ? (
               <div className="text-center py-16">

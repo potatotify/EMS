@@ -28,6 +28,7 @@ export default function EmployeesSection() {
   const [monthlyAttendanceData, setMonthlyAttendanceData] = useState<Record<string, number>>({});
   const [customDurationData, setCustomDurationData] = useState<Record<string, number>>({});
   const [hoursWorkedData, setHoursWorkedData] = useState<Record<string, number>>({});
+  const [hoursWorkedTodayData, setHoursWorkedTodayData] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
@@ -50,12 +51,14 @@ export default function EmployeesSection() {
       fetchAttendanceForAll();
       fetchMonthlyAttendance();
       fetchHoursWorked();
+      fetchHoursWorkedToday();
     }
   }, [employees, selectedDate]);
 
   useEffect(() => {
     if (employees.length > 0) {
       fetchCustomDurationAttendance();
+      fetchHoursWorked();
     }
   }, [employees, customStartDate, customEndDate]);
 
@@ -154,16 +157,155 @@ export default function EmployeesSection() {
     if (employees.length === 0) return;
     
     try {
-      console.log('[EmployeesSection] Fetching hours worked...');
-      const response = await fetch("/api/admin/employee/hours-worked");
-      const data = await response.json();
-      console.log('[EmployeesSection] Hours worked response:', data);
-      if (response.ok && data.hoursMap) {
-        console.log('[EmployeesSection] Setting hours worked data:', data.hoursMap);
-        setHoursWorkedData(data.hoursMap);
-      }
+      // Use custom duration dates if available, otherwise use current month
+      const startDate = customStartDate 
+        ? new Date(customStartDate)
+        : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+      startDate.setHours(0, 0, 0, 0);
+      
+      const endDate = customEndDate
+        ? new Date(customEndDate)
+        : new Date();
+      endDate.setHours(23, 59, 59, 999);
+
+      console.log('[EmployeesSection] Fetching hours worked for date range:', startDate.toISOString(), 'to', endDate.toISOString());
+
+      const hoursPromises = employees.map(async (emp) => {
+        try {
+          let totalHours = 0;
+          
+          // First, try to get hours from completed tasks (primary source)
+          try {
+            const startDateStr = customStartDate || new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split("T")[0];
+            const endDateStr = customEndDate || new Date().toISOString().split("T")[0];
+            const taskHoursResponse = await fetch(
+              `/api/admin/employee/${emp._id}/task-hours?startDate=${startDateStr}&endDate=${endDateStr}`
+            );
+            if (taskHoursResponse.ok) {
+              const taskHoursData = await taskHoursResponse.json();
+              totalHours = taskHoursData.totalHours || 0;
+            }
+          } catch (error) {
+            console.error(`Error fetching task hours for ${emp._id}:`, error);
+          }
+          
+          // Also check daily updates and attendance records (fallback/additional sources)
+          const response = await fetch(`/api/admin/employee/${emp._id}`);
+          const data = await response.json();
+          if (response.ok) {
+            // Add hours from daily updates
+            if (data.dailyUpdates && data.dailyUpdates.length > 0) {
+              const updatesInRange = data.dailyUpdates.filter((update: any) => {
+                const updateDate = new Date(update.date);
+                return updateDate >= startDate && updateDate <= endDate;
+              });
+              const dailyUpdateHours = updatesInRange.reduce((sum: number, update: any) => {
+                return sum + (Number(update.hoursWorked) || 0);
+              }, 0);
+              totalHours += dailyUpdateHours;
+            }
+            
+            // Add hours from attendance records
+            if (data.attendanceRecords && data.attendanceRecords.length > 0) {
+              const attendanceInRange = data.attendanceRecords.filter((record: any) => {
+                const recordDate = new Date(record.date);
+                return recordDate >= startDate && recordDate <= endDate;
+              });
+              const attendanceHours = attendanceInRange.reduce((sum: number, record: any) => {
+                return sum + (Number(record.hoursWorked) || 0);
+              }, 0);
+              totalHours += attendanceHours;
+            }
+          }
+          
+          return {userId: emp.userId, hours: totalHours};
+        } catch (error) {
+          console.error(`Error fetching hours worked for ${emp._id}:`, error);
+        }
+        return {userId: emp.userId, hours: 0};
+      });
+
+      const results = await Promise.all(hoursPromises);
+      const hoursMap: Record<string, number> = {};
+      results.forEach((result) => {
+        hoursMap[result.userId] = result.hours;
+      });
+      console.log('[EmployeesSection] Hours worked data:', hoursMap);
+      setHoursWorkedData(hoursMap);
     } catch (error) {
       console.error("Error fetching hours worked:", error);
+    }
+  };
+
+  const fetchHoursWorkedToday = async () => {
+    if (employees.length === 0) return;
+    
+    try {
+      const targetDate = new Date(selectedDate);
+      const startOfDay = new Date(targetDate);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(targetDate);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      const hoursPromises = employees.map(async (emp) => {
+        try {
+          let hours = 0;
+          
+          // First, try to get hours from completed tasks (primary source)
+          try {
+            const taskHoursResponse = await fetch(
+              `/api/admin/employee/${emp._id}/task-hours?startDate=${selectedDate}&endDate=${selectedDate}`
+            );
+            if (taskHoursResponse.ok) {
+              const taskHoursData = await taskHoursResponse.json();
+              hours = taskHoursData.totalHours || 0;
+            }
+          } catch (error) {
+            console.error(`Error fetching task hours for ${emp._id}:`, error);
+          }
+          
+          // Also check daily updates and attendance records (fallback/additional sources)
+          const response = await fetch(`/api/admin/employee/${emp._id}`);
+          const data = await response.json();
+          if (response.ok) {
+            // Add hours from daily updates
+            if (data.dailyUpdates && data.dailyUpdates.length > 0) {
+              const todayUpdate = data.dailyUpdates.find((update: any) => {
+                const updateDate = new Date(update.date);
+                return updateDate >= startOfDay && updateDate <= endOfDay;
+              });
+              if (todayUpdate && todayUpdate.hoursWorked) {
+                hours += Number(todayUpdate.hoursWorked) || 0;
+              }
+            }
+            
+            // Add hours from attendance records
+            if (data.attendanceRecords && data.attendanceRecords.length > 0) {
+              const todayAttendance = data.attendanceRecords.find((record: any) => {
+                const recordDate = new Date(record.date);
+                return recordDate >= startOfDay && recordDate <= endOfDay;
+              });
+              if (todayAttendance && todayAttendance.hoursWorked) {
+                hours += Number(todayAttendance.hoursWorked) || 0;
+              }
+            }
+          }
+          
+          return {employeeId: emp._id, hours: hours};
+        } catch (error) {
+          console.error(`Error fetching today's hours for ${emp._id}:`, error);
+        }
+        return {employeeId: emp._id, hours: 0};
+      });
+
+      const results = await Promise.all(hoursPromises);
+      const hoursMap: Record<string, number> = {};
+      results.forEach((result) => {
+        hoursMap[result.employeeId] = result.hours;
+      });
+      setHoursWorkedTodayData(hoursMap);
+    } catch (error) {
+      console.error("Error fetching today's hours worked:", error);
     }
   };
 
@@ -217,12 +359,94 @@ export default function EmployeesSection() {
     return {present: false, record: null};
   };
 
+  // Table Row Skeleton
+  const EmployeeRowSkeleton = () => (
+    <tr className="hover:bg-gray-50 transition-colors animate-pulse">
+      <td className="px-4 py-3">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 bg-neutral-200 rounded-lg"></div>
+          <div className="h-4 bg-neutral-200 rounded w-32"></div>
+        </div>
+      </td>
+      <td className="px-4 py-3">
+        <div className="h-4 bg-neutral-200 rounded w-16"></div>
+      </td>
+      <td className="px-4 py-3">
+        <div className="h-4 bg-neutral-200 rounded w-16"></div>
+      </td>
+      <td className="px-4 py-3">
+        <div className="h-4 bg-neutral-200 rounded w-20"></div>
+      </td>
+      <td className="px-4 py-3">
+        <div className="h-4 bg-neutral-200 rounded w-20"></div>
+      </td>
+      <td className="px-4 py-3">
+        <div className="h-6 bg-neutral-200 rounded w-24"></div>
+      </td>
+      <td className="px-4 py-3">
+        <div className="h-8 bg-neutral-200 rounded w-20"></div>
+      </td>
+    </tr>
+  );
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <div className="text-center">
-          <div className="w-8 h-8 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-sm text-gray-600">Loading employees...</p>
+      <div className="space-y-6">
+        {/* Filters Skeleton */}
+        <div className="flex flex-col gap-4 animate-pulse">
+          <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
+            <div className="relative flex-1 w-full sm:max-w-md">
+              <div className="h-10 bg-neutral-200 rounded-xl"></div>
+            </div>
+            <div className="h-10 bg-neutral-200 rounded-xl w-32"></div>
+          </div>
+          <div className="bg-neutral-100 rounded-xl p-4">
+            <div className="h-4 bg-neutral-200 rounded w-32 mb-3"></div>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="h-10 bg-neutral-200 rounded w-40"></div>
+              <div className="h-10 bg-neutral-200 rounded w-40"></div>
+            </div>
+          </div>
+        </div>
+
+        {/* Table Skeleton */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-linear-to-r from-emerald-600 to-teal-600 text-white">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
+                    Employee
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
+                    This Month's Attendance
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
+                    Custom Duration
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
+                    Hours Worked (Custom Duration)
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
+                    Hours Worked Today
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
+                    Attendance Status
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                <EmployeeRowSkeleton />
+                <EmployeeRowSkeleton />
+                <EmployeeRowSkeleton />
+                <EmployeeRowSkeleton />
+                <EmployeeRowSkeleton />
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     );
@@ -244,22 +468,11 @@ export default function EmployeesSection() {
             />
           </div>
           <div className="flex items-center gap-3">
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">
-                View Date
-              </label>
-              <input
-                type="date"
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm"
-              />
-            </div>
             <motion.button
               whileHover={{scale: 1.05}}
               whileTap={{scale: 0.95}}
               onClick={fetchEmployees}
-              className="inline-flex items-center gap-2 px-4 py-2 gradient-emerald text-white rounded-xl text-sm font-semibold transition-all shadow-md hover:shadow-lg mt-6"
+              className="inline-flex items-center gap-2 px-4 py-2 gradient-emerald text-white rounded-xl text-sm font-semibold transition-all shadow-md hover:shadow-lg"
             >
               <RefreshCw className="w-4 h-4" />
               Refresh
@@ -324,7 +537,10 @@ export default function EmployeesSection() {
                   Custom Duration
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
-                  Hours Worked
+                  Hours Worked (Custom Duration)
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
+                  Hours Worked Today
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
                   Attendance Status
@@ -337,7 +553,7 @@ export default function EmployeesSection() {
             <tbody className="bg-white divide-y divide-gray-200">
               {filteredEmployees.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
+                  <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
                     {searchTerm ? "No employees found matching your search" : "No employees found"}
                   </td>
                 </tr>
@@ -381,8 +597,16 @@ export default function EmployeesSection() {
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           <Clock className="w-4 h-4 text-blue-500" />
-                          <span className="text-sm font-semibold text-blue-900" title={`User ID: ${employee.userId}, Hours: ${hoursWorkedData[employee.userId] || 0}`}>
+                          <span className="text-sm font-semibold text-blue-900" title={`Hours worked from ${customStartDate} to ${customEndDate}: ${hoursWorkedData[employee.userId] || 0}`}>
                             {(hoursWorkedData[employee.userId] || 0).toFixed(1)}h
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <Clock className="w-4 h-4 text-emerald-600" />
+                          <span className="text-sm font-semibold text-emerald-700" title={`Hours worked on ${selectedDate}: ${hoursWorkedTodayData[employee._id] || 0}`}>
+                            {(hoursWorkedTodayData[employee._id] || 0).toFixed(1)}h
                           </span>
                         </div>
                       </td>

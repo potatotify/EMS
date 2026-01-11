@@ -38,7 +38,25 @@ export async function POST(request: NextRequest) {
 
     // Check if user is admin or lead assignee
     const isAdmin = session.user.role === "admin";
-    const isLeadAssignee = project.leadAssignee?.toString() === userId.toString();
+    let isLeadAssignee = false;
+
+    // Check if leadAssignee is an array (multiple lead assignees)
+    if (Array.isArray(project.leadAssignee)) {
+      isLeadAssignee = project.leadAssignee.some((lead: any) => {
+        if (!lead) return false;
+        const leadId = lead instanceof ObjectId ? lead.toString() : 
+                      (typeof lead === 'object' && lead._id ? lead._id.toString() : lead.toString());
+        return leadId === userId.toString();
+      });
+    } else if (project.leadAssignee) {
+      // Single lead assignee (legacy support)
+      const leadId = project.leadAssignee instanceof ObjectId 
+        ? project.leadAssignee.toString() 
+        : (typeof project.leadAssignee === 'object' && project.leadAssignee._id 
+          ? project.leadAssignee._id.toString() 
+          : project.leadAssignee.toString());
+      isLeadAssignee = leadId === userId.toString();
+    }
 
     if (!isAdmin && !isLeadAssignee) {
       return NextResponse.json(
@@ -112,7 +130,25 @@ export async function DELETE(request: NextRequest) {
 
     // Check if user is admin or lead assignee
     const isAdmin = session.user.role === "admin";
-    const isLeadAssignee = project.leadAssignee?.toString() === userId.toString();
+    let isLeadAssignee = false;
+
+    // Check if leadAssignee is an array (multiple lead assignees)
+    if (Array.isArray(project.leadAssignee)) {
+      isLeadAssignee = project.leadAssignee.some((lead: any) => {
+        if (!lead) return false;
+        const leadId = lead instanceof ObjectId ? lead.toString() : 
+                      (typeof lead === 'object' && lead._id ? lead._id.toString() : lead.toString());
+        return leadId === userId.toString();
+      });
+    } else if (project.leadAssignee) {
+      // Single lead assignee (legacy support)
+      const leadId = project.leadAssignee instanceof ObjectId 
+        ? project.leadAssignee.toString() 
+        : (typeof project.leadAssignee === 'object' && project.leadAssignee._id 
+          ? project.leadAssignee._id.toString() 
+          : project.leadAssignee.toString());
+      isLeadAssignee = leadId === userId.toString();
+    }
 
     if (!isAdmin && !isLeadAssignee) {
       return NextResponse.json(

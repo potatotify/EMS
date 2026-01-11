@@ -431,12 +431,27 @@ export default function ProjectDetailsModal({
               )}
               {project.vaIncharge && (
                 <div>
-                  <p className="text-gray-600 font-medium">VA Incharge</p>
-                  <p className="text-gray-900">
-                    {typeof project.vaIncharge === 'object' ? project.vaIncharge.name : project.vaIncharge}
-                  </p>
-                  {typeof project.vaIncharge === 'object' && project.vaIncharge.email && (
-                    <p className="text-gray-500 text-xs">{project.vaIncharge.email}</p>
+                  <p className="text-gray-600 font-medium">VA Incharge{Array.isArray(project.vaIncharge) && project.vaIncharge.length > 1 ? 's' : ''}</p>
+                  {Array.isArray(project.vaIncharge) ? (
+                    project.vaIncharge.map((va: any, idx: number) => (
+                      <div key={idx} className="mb-2">
+                        <p className="text-gray-900">
+                          {typeof va === 'object' ? va.name : va}
+                        </p>
+                        {typeof va === 'object' && va.email && (
+                          <p className="text-gray-500 text-xs">{va.email}</p>
+                        )}
+                      </div>
+                    ))
+                  ) : (
+                    <>
+                      <p className="text-gray-900">
+                        {typeof project.vaIncharge === 'object' ? project.vaIncharge.name : project.vaIncharge}
+                      </p>
+                      {typeof project.vaIncharge === 'object' && project.vaIncharge.email && (
+                        <p className="text-gray-500 text-xs">{project.vaIncharge.email}</p>
+                      )}
+                    </>
                   )}
                 </div>
               )}

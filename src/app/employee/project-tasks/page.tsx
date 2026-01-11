@@ -335,6 +335,42 @@ function EmployeeProjectTasksContent() {
       return;
     }
 
+    // Double-check: Verify task is actually assigned to current user before proceeding
+    if (!session?.user?.id) {
+      alert("Unable to verify user. Please refresh the page.");
+      return;
+    }
+
+    const userIdStr = session.user.id.toString();
+    let isAssigned = false;
+
+    // Check assignedTo
+    if (task.assignedTo) {
+      let assignedToId: string | null = null;
+      if (typeof task.assignedTo === 'string') {
+        assignedToId = task.assignedTo;
+      } else if (task.assignedTo && typeof task.assignedTo === 'object') {
+        assignedToId = task.assignedTo._id || task.assignedTo.toString();
+      }
+      if (assignedToId && assignedToId.toString() === userIdStr) {
+        isAssigned = true;
+      }
+    }
+
+    // Check assignees array
+    if (!isAssigned && Array.isArray(task.assignees)) {
+      isAssigned = task.assignees.some((assignee: any) => {
+        const assigneeId = assignee?._id?.toString() || assignee?.toString() || assignee;
+        return assigneeId === userIdStr;
+      });
+    }
+
+    // If not assigned, don't proceed
+    if (!isAssigned) {
+      alert("You can only tick tasks assigned to you.");
+      return;
+    }
+
     // Check if all subtasks are completed before allowing task completion
     if (task.status !== "completed" && task.subtasks && task.subtasks.length > 0) {
       const completedSubtasks = task.subtasks.filter(s => s.ticked).length;
@@ -348,9 +384,9 @@ function EmployeeProjectTasksContent() {
 
     const newStatus = task.status === "completed" ? "pending" : "completed";
     
-    // If completing the task, ask for time spent
+    // If completing the task, ask for time spent (only if task is assigned to user)
     let timeSpent: number | undefined;
-    if (newStatus === "completed") {
+    if (newStatus === "completed" && isAssigned) {
       const timeInput = prompt("How many hours did you spend on this task?");
       if (timeInput === null) {
         return; // User cancelled
@@ -521,6 +557,88 @@ function EmployeeProjectTasksContent() {
     }
   };
 
+  const handleDeleteSection = async (section: string) => {
+    if (!isLeadAssignee) {
+      alert("Only lead assignees can delete sections");
+      return;
+    }
+
+    const sectionTasks = tasks[section] || [];
+    const taskCount = sectionTasks.length;
+    
+    if (taskCount === 0) {
+      // Section is empty, just remove it from state and database
+      const confirmMessage = `Are you sure you want to delete the section "${section}"?`;
+      if (!confirm(confirmMessage)) return;
+      
+      try {
+        // Remove from database
+        const response = await fetch(`/api/admin/projects/sections`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            projectId,
+            sectionName: section,
+          }),
+        });
+
+        if (!response.ok) {
+          const data = await response.json();
+          throw new Error(data.error || "Failed to delete section");
+        }
+
+        setSections((prev) => prev.filter((s) => s !== section));
+        setTasks((prev) => {
+          const newTasks = { ...prev };
+          delete newTasks[section];
+          return newTasks;
+        });
+      } catch (error) {
+        console.error("Error deleting section:", error);
+        alert(error instanceof Error ? error.message : "Failed to delete section");
+      }
+      return;
+    }
+
+    const confirmMessage = `Are you sure you want to delete the section "${section}"?\n\nThis will delete ${taskCount} task${taskCount > 1 ? 's' : ''} in this section. This action cannot be undone.`;
+    
+    if (!confirm(confirmMessage)) return;
+
+    try {
+      // Delete all tasks in the section
+      const deletePromises = sectionTasks.map((task) =>
+        fetch(`/api/employee/tasks/${task._id}`, {
+          method: "DELETE",
+        })
+      );
+
+      await Promise.all(deletePromises);
+      
+      // Remove section from database
+      await fetch(`/api/admin/projects/sections`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId,
+          sectionName: section,
+        }),
+      });
+      
+      // Remove section from state after deleting tasks
+      setSections((prev) => prev.filter((s) => s !== section));
+      setTasks((prev) => {
+        const newTasks = { ...prev };
+        delete newTasks[section];
+        return newTasks;
+      });
+      
+      await fetchTasks(projectId!);
+    } catch (error) {
+      console.error("Error deleting section:", error);
+      alert("Error deleting section. Please try again.");
+    }
+  };
+
   const getPriorityColor = (priority: number) => {
     if (priority >= 8) return "text-red-500";
     if (priority >= 5) return "text-orange-500";
@@ -639,8 +757,43 @@ function EmployeeProjectTasksContent() {
     return filtered;
   };
 
+  // Skeleton Loader Component
+  const TaskSkeleton = () => (
+    <div className="flex items-start gap-2 p-3 bg-white rounded-lg border border-neutral-200 shadow-sm animate-pulse">
+      <div className="flex-shrink-0">
+        <div className="w-5 h-5 bg-neutral-200 rounded-full"></div>
+      </div>
+      <div className="flex-1 min-w-0 space-y-2">
+        <div className="h-4 bg-neutral-200 rounded w-3/4"></div>
+        <div className="h-3 bg-neutral-200 rounded w-1/2"></div>
+        <div className="flex items-center gap-2">
+          <div className="h-3 w-3 bg-neutral-200 rounded"></div>
+          <div className="h-3 w-16 bg-neutral-200 rounded"></div>
+          <div className="h-3 w-20 bg-neutral-200 rounded"></div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const SectionSkeleton = () => (
+    <div className="flex-shrink-0 w-80 min-w-[320px] bg-neutral-50 rounded-xl p-4 border border-neutral-200">
+      <div className="flex items-center justify-between mb-4">
+        <div className="h-5 bg-neutral-200 rounded w-24 animate-pulse"></div>
+      </div>
+      <div className="space-y-2">
+        <TaskSkeleton />
+        <TaskSkeleton />
+        <TaskSkeleton />
+      </div>
+    </div>
+  );
+
   if (status === "loading") {
-    return <div className="min-h-screen bg-neutral-50 flex items-center justify-center">Loading...</div>;
+    return (
+      <div className="min-h-screen bg-neutral-50 flex items-center justify-center">
+        <div className="w-8 h-8 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
   }
 
   if (!session) {
@@ -878,6 +1031,15 @@ function EmployeeProjectTasksContent() {
                     <h3 className="font-semibold text-neutral-700">
                       {section} {sectionTasks.length > 0 && `(${sectionTasks.length})`}
                     </h3>
+                    {isLeadAssignee && (
+                      <button
+                        onClick={() => handleDeleteSection(section)}
+                        className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-red-50 text-red-500 hover:text-red-600 rounded transition-all"
+                        title="Delete section"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
 
                   {/* Section Tasks */}
@@ -910,6 +1072,7 @@ function EmployeeProjectTasksContent() {
                           formatDate={formatDate}
                           isOverdue={isOverdue(task)}
                           currentUserId={session?.user?.id}
+                          isLeadAssignee={isLeadAssignee}
                         />
                       )
                     ))}
@@ -942,7 +1105,7 @@ function EmployeeProjectTasksContent() {
             })}
 
             {/* Add Section Button - Board View */}
-            {!showSectionInput && (
+            {!loading && !showSectionInput && (
               <div className="flex-shrink-0 w-80 min-w-[320px]">
                 <button
                   onClick={() => setShowSectionInput(true)}
@@ -1017,6 +1180,15 @@ function EmployeeProjectTasksContent() {
                         </span>
                       )}
                     </div>
+                    {isLeadAssignee && (
+                      <button
+                        onClick={() => handleDeleteSection(section)}
+                        className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-red-50 text-red-500 hover:text-red-600 rounded transition-all"
+                        title="Delete section"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
 
                   {/* Section Tasks */}
@@ -1049,6 +1221,7 @@ function EmployeeProjectTasksContent() {
                           formatDate={formatDate}
                           isOverdue={isOverdue(task)}
                           currentUserId={session?.user?.id}
+                          isLeadAssignee={isLeadAssignee}
                         />
                       )
                     ))}
@@ -1081,7 +1254,7 @@ function EmployeeProjectTasksContent() {
             })}
 
             {/* Add Section Button - List View */}
-            {!showSectionInput && sections.length > 0 && (
+            {!loading && !showSectionInput && sections.length > 0 && (
               <div className="mb-8">
                 <button
                   onClick={() => setShowSectionInput(true)}
@@ -1146,8 +1319,26 @@ function EmployeeProjectTasksContent() {
         </div>
       )}
 
-      {loading && (
-        <div className="text-center py-12 text-neutral-400">Loading tasks...</div>
+      {viewMode === "board" && loading && (
+        <div className="w-full overflow-x-auto overflow-y-visible p-6">
+          <div className="inline-flex gap-4">
+            <SectionSkeleton />
+            <SectionSkeleton />
+            <SectionSkeleton />
+          </div>
+        </div>
+      )}
+
+      {viewMode === "list" && loading && (
+        <div className="max-w-7xl mx-auto p-6 space-y-6">
+          <div className="h-6 bg-neutral-200 rounded w-48 animate-pulse mb-4"></div>
+          <div className="space-y-2">
+            <TaskSkeleton />
+            <TaskSkeleton />
+            <TaskSkeleton />
+            <TaskSkeleton />
+          </div>
+        </div>
       )}
 
       {!loading && sections.length === 0 && !creatingTask && (
@@ -1394,6 +1585,7 @@ function TaskItem({
   formatDate,
   isOverdue,
   currentUserId,
+  isLeadAssignee,
 }: {
   task: Task;
   onToggleComplete: () => void;
@@ -1405,6 +1597,7 @@ function TaskItem({
   formatDate: (date?: string) => string;
   isOverdue: boolean;
   currentUserId?: string;
+  isLeadAssignee?: boolean;
 }) {
   const isNotApplicable = Boolean((task as any).notApplicable);
   
@@ -1542,7 +1735,7 @@ function TaskItem({
         >
           <Edit2 className="w-4 h-4 text-neutral-500" />
         </button>
-        {onDelete && (task as any).createdBy && currentUserId && (task as any).createdBy === currentUserId && (
+        {onDelete && ((isLeadAssignee) || ((task as any).createdBy && currentUserId && (task as any).createdBy === currentUserId)) && (
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -1551,7 +1744,7 @@ function TaskItem({
               }
             }}
             className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-red-50 text-red-500 hover:text-red-600 rounded transition-all"
-            title="Delete task (only tasks you created)"
+            title={isLeadAssignee ? "Delete task (lead assignee)" : "Delete task (only tasks you created)"}
           >
             <Trash2 className="w-4 h-4" />
           </button>
@@ -1672,19 +1865,22 @@ function EmployeeTaskForm({
             });
           }
 
-          // Add VA incharge
+          // Add VA incharges (can be array or single)
           if (project.vaIncharge) {
-            const va = typeof project.vaIncharge === 'object'
-              ? project.vaIncharge
-              : { _id: project.vaIncharge, name: 'VA Incharge', email: '' };
-            const vaId = va._id?.toString() || project.vaIncharge.toString();
-            if (!employees.find(e => e._id === vaId)) {
-              employees.push({
-                _id: vaId,
-                name: va.name || 'VA Incharge',
-                email: va.email || ''
-              });
-            }
+            const vaList = Array.isArray(project.vaIncharge) ? project.vaIncharge : [project.vaIncharge];
+            vaList.forEach((va: any) => {
+              const vaObj = typeof va === 'object' && va._id
+                ? va
+                : { _id: va, name: 'VA Incharge', email: '' };
+              const vaId = vaObj._id?.toString() || va.toString();
+              if (!employees.find(e => e._id === vaId)) {
+                employees.push({
+                  _id: vaId,
+                  name: vaObj.name || 'VA Incharge',
+                  email: vaObj.email || ''
+                });
+              }
+            });
           }
 
           // Add assignees

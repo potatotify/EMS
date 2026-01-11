@@ -337,15 +337,49 @@ export async function DELETE(
 
     const taskAny = task as any;
     const userId = session.user.id;
+    const userIdObj = new ObjectId(userId);
 
     // Check if user created the task
     const createdById = taskAny.createdBy instanceof ObjectId 
       ? taskAny.createdBy.toString() 
       : taskAny.createdBy.toString();
     
-    if (createdById !== userId) {
+    const isCreator = createdById === userId;
+
+    // Check if user is lead assignee of the project
+    let isLeadAssignee = false;
+    if (taskAny.projectId) {
+      const client = await clientPromise;
+      const db = client.db("worknest");
+      const project = await db.collection("projects").findOne({
+        _id: taskAny.projectId instanceof ObjectId ? taskAny.projectId : new ObjectId(taskAny.projectId),
+      });
+
+      if (project) {
+        // Check if leadAssignee is an array (multiple lead assignees)
+        if (Array.isArray(project.leadAssignee)) {
+          isLeadAssignee = project.leadAssignee.some((lead: any) => {
+            if (!lead) return false;
+            const leadId = lead instanceof ObjectId ? lead.toString() : 
+                          (typeof lead === 'object' && lead._id ? lead._id.toString() : lead.toString());
+            return leadId === userId;
+          });
+        } else if (project.leadAssignee) {
+          // Single lead assignee (legacy support)
+          const leadId = project.leadAssignee instanceof ObjectId 
+            ? project.leadAssignee.toString() 
+            : (typeof project.leadAssignee === 'object' && project.leadAssignee._id 
+              ? project.leadAssignee._id.toString() 
+              : project.leadAssignee.toString());
+          isLeadAssignee = leadId === userId;
+        }
+      }
+    }
+
+    // Allow deletion if user is creator OR lead assignee
+    if (!isCreator && !isLeadAssignee) {
       return NextResponse.json({ 
-        error: "You can only delete tasks you created" 
+        error: "You can only delete tasks you created or tasks in projects where you are the lead assignee" 
       }, { status: 403 });
     }
 

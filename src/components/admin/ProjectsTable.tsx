@@ -1,7 +1,7 @@
 "use client";
 
 import {useState, useEffect, Fragment} from "react";
-import {Eye, Calendar, Tag, Users, Search, RefreshCw, TrendingUp, Plus, ChevronDown, Check} from "lucide-react";
+import {Eye, Calendar, Tag, Users, Search, RefreshCw, TrendingUp, Plus, ChevronDown, Check, Clock} from "lucide-react";
 import {motion} from "framer-motion";
 import CreateProjectModal from "./CreateProjectModal";
 
@@ -51,6 +51,15 @@ export default function ProjectsTable({
   const [projectUpdates, setProjectUpdates] = useState<Record<string, ProjectUpdate[]>>({});
   const [loadingUpdates, setLoadingUpdates] = useState<Set<string>>(new Set());
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
+  const [todayDailyUpdates, setTodayDailyUpdates] = useState<Record<string, {
+    hoursWorked: number;
+    progress: number;
+    tasksCompleted?: string[];
+    notes?: string;
+    challenges?: string;
+    nextSteps?: string;
+    date: string;
+  } | null>>({});
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [statusDropdownOpen, setStatusDropdownOpen] = useState<string | null>(null);
   const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
@@ -216,6 +225,192 @@ export default function ProjectsTable({
     });
   };
 
+  const fetchTodayDailyUpdates = async () => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    // Use local date string to avoid timezone issues
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    const todayStr = `${year}-${month}-${day}`;
+    
+    const endOfDay = new Date(today);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    try {
+      // Fetch project daily updates for last 7 days (matching ProjectDailyUpdatesTable default)
+      // This ensures we get recent updates even if there are timezone issues
+      const sevenDaysAgo = new Date(today);
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      const year = sevenDaysAgo.getFullYear();
+      const month = String(sevenDaysAgo.getMonth() + 1).padStart(2, '0');
+      const day = String(sevenDaysAgo.getDate()).padStart(2, '0');
+      const sevenDaysAgoStr = `${year}-${month}-${day}`;
+      
+      const url = `/api/admin/project-daily-updates?startDate=${sevenDaysAgoStr}&endDate=${todayStr}`;
+      
+      const response = await fetch(url);
+      
+      if (!response.ok) {
+        return;
+      }
+
+      const data = await response.json();
+      const projectsWithUpdates = data.projects || [];
+
+      const updatesMap: Record<string, {
+        hoursWorked: number;
+        progress: number;
+        tasksCompleted?: string[];
+        notes?: string;
+        challenges?: string;
+        nextSteps?: string;
+        date: string;
+      } | null> = {};
+
+      // For each project, find today's update from the lead assignee
+      projects.forEach((project) => {
+        // Try to match project by ID (handle both string and ObjectId formats)
+        const projectData = projectsWithUpdates.find((p: any) => {
+          const pId = String(p._id || "");
+          const projId = String(project._id || "");
+          const matchById = pId === projId;
+          const matchByName = p.projectName === project.projectName;
+          return matchById || matchByName;
+        });
+
+        if (!projectData) {
+          updatesMap[project._id] = null;
+          return;
+        }
+
+        // Get lead assignee IDs - use same logic as ProjectDailyUpdatesTable
+        const leadAssigneeIds: string[] = [];
+        
+        // Check projectData.leadAssignees first (from API response) - this is what ProjectDailyUpdatesTable uses
+        if (projectData.leadAssignees && Array.isArray(projectData.leadAssignees)) {
+          projectData.leadAssignees.forEach((lead: any) => {
+            if (lead?._id) {
+              leadAssigneeIds.push(String(lead._id));
+            }
+          });
+        }
+        
+        // Also check project.leadAssignee (from props) as fallback
+        if (leadAssigneeIds.length === 0 && project.leadAssignee) {
+          if (Array.isArray(project.leadAssignee)) {
+            project.leadAssignee.forEach((lead: any) => {
+              const id = lead?._id || lead;
+              if (id) {
+                leadAssigneeIds.push(String(id));
+              }
+            });
+          } else {
+            const id = project.leadAssignee?._id || project.leadAssignee;
+            if (id) {
+              leadAssigneeIds.push(String(id));
+            }
+          }
+        }
+
+        if (leadAssigneeIds.length === 0) {
+          updatesMap[project._id] = null;
+          return;
+        }
+
+        if (!projectData.updates || projectData.updates.length === 0) {
+          updatesMap[project._id] = null;
+          return;
+        }
+
+        // Find today's update from any lead assignee - use same date comparison as ProjectDailyUpdatesTable
+        const todayDateStr = today.toDateString();
+        
+        // Also create a date string in YYYY-MM-DD format for comparison
+        const todayYear = today.getFullYear();
+        const todayMonth = String(today.getMonth() + 1).padStart(2, '0');
+        const todayDay = String(today.getDate()).padStart(2, '0');
+        const todayDateStrISO = `${todayYear}-${todayMonth}-${todayDay}`;
+        
+        // First, try to find today's update
+        let todayUpdate = projectData.updates.find((update: any) => {
+          // Use same date comparison as ProjectDailyUpdatesTable (toDateString())
+          const updateDate = new Date(update.date);
+          const updateDateStr = updateDate.toDateString();
+          const updateDateISO = updateDate.toISOString().split('T')[0];
+          
+          // Try both comparison methods
+          const isTodayByString = updateDateStr === todayDateStr;
+          const isTodayByISO = updateDateISO === todayDateStrISO;
+          const isToday = isTodayByString || isTodayByISO;
+          
+          // Use same employeeId comparison as ProjectDailyUpdatesTable (direct string comparison)
+          const updateEmployeeId = String(update.employeeId || "");
+          const isLeadAssignee = leadAssigneeIds.some(leadId => 
+            String(leadId) === updateEmployeeId
+          );
+          
+          return isToday && isLeadAssignee;
+        });
+        
+        // If no today's update found, get the most recent update from a lead assignee
+        // This matches the behavior of ProjectDailyUpdatesTable which shows recent updates
+        if (!todayUpdate) {
+          const leadAssigneeUpdates = projectData.updates
+            .filter((update: any) => {
+              const updateEmployeeId = String(update.employeeId || "");
+              return leadAssigneeIds.some(leadId => String(leadId) === updateEmployeeId);
+            })
+            .sort((a: any, b: any) => {
+              const dateA = new Date(a.date).getTime();
+              const dateB = new Date(b.date).getTime();
+              return dateB - dateA; // Most recent first
+            });
+          
+          if (leadAssigneeUpdates.length > 0) {
+            const mostRecent = leadAssigneeUpdates[0];
+            const mostRecentDate = new Date(mostRecent.date);
+            
+            // Show most recent update if it's from the last 7 days (matching ProjectDailyUpdatesTable default range)
+            const sevenDaysAgo = new Date(today);
+            sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+            
+            if (mostRecentDate >= sevenDaysAgo) {
+              todayUpdate = mostRecent;
+            }
+          }
+        }
+
+        if (todayUpdate) {
+          // Store the full update object to match ProjectDailyUpdatesTable format
+          updatesMap[project._id] = {
+            hoursWorked: todayUpdate.hoursWorked || 0,
+            progress: todayUpdate.progress || 0,
+            tasksCompleted: todayUpdate.tasksCompleted || [],
+            notes: todayUpdate.notes || "",
+            challenges: todayUpdate.challenges || "",
+            nextSteps: todayUpdate.nextSteps || "",
+            date: todayUpdate.date || "",
+          };
+        } else {
+          updatesMap[project._id] = null;
+        }
+      });
+
+      setTodayDailyUpdates(updatesMap);
+    } catch (error) {
+      console.error("Error fetching today's daily updates:", error);
+    }
+  };
+
+  useEffect(() => {
+    if (projects.length > 0) {
+      // Fetch today's daily updates for lead assignees
+      fetchTodayDailyUpdates();
+    }
+  }, [projects]);
+
   const filteredProjects = projects.filter((project) =>
     project.projectName.toLowerCase().includes(searchTerm.toLowerCase()) ||
     project.clientName.toLowerCase().includes(searchTerm.toLowerCase())
@@ -248,7 +443,10 @@ export default function ProjectsTable({
           <motion.button
             whileHover={{scale: 1.05}}
             whileTap={{scale: 0.95}}
-            onClick={onRefresh}
+            onClick={() => {
+              onRefresh();
+              fetchTodayDailyUpdates();
+            }}
             className="inline-flex items-center gap-2 px-4 py-2 gradient-emerald text-white rounded-xl text-sm font-semibold transition-all shadow-md hover:shadow-lg"
           >
             <RefreshCw className="w-4 h-4" />
@@ -290,8 +488,8 @@ export default function ProjectsTable({
                 <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider">
                   Progress
                 </th>
-                <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider">
-                  Updates
+                <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider min-w-[300px]">
+                  Today's Daily Update
                 </th>
                 <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider">
                   Tags
@@ -304,7 +502,7 @@ export default function ProjectsTable({
             <tbody className="bg-white divide-y divide-neutral-100">
               {filteredProjects.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="px-6 py-16 text-center">
+                  <td colSpan={11} className="px-6 py-16 text-center">
                     <div className="flex flex-col items-center gap-3">
                       <div className="w-16 h-16 rounded-full bg-neutral-100 flex items-center justify-center">
                         <Search className="w-8 h-8 text-neutral-400" />
@@ -420,18 +618,32 @@ export default function ProjectsTable({
                           })()}
                         </td>
                         <td className="px-6 py-4">
-                          {project.vaIncharge?.name || (typeof project.vaIncharge === 'string' && project.vaIncharge) ? (
-                            <div className="flex items-center gap-2">
-                              <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center">
-                                <Users className="w-3 h-3 text-blue-600" />
+                          {(() => {
+                            if (!project.vaIncharge) {
+                              return <span className="text-sm text-neutral-400">Not assigned</span>;
+                            }
+                            const vaList = Array.isArray(project.vaIncharge) ? project.vaIncharge : [project.vaIncharge];
+                            if (vaList.length === 0) {
+                              return <span className="text-sm text-neutral-400">Not assigned</span>;
+                            }
+                            return (
+                              <div className="flex flex-col gap-1">
+                                {vaList.map((va: any, idx: number) => {
+                                  const vaName = typeof va === 'object' ? va.name : va;
+                                  return (
+                                    <div key={idx} className="flex items-center gap-2">
+                                      <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center">
+                                        <Users className="w-3 h-3 text-blue-600" />
+                                      </div>
+                                      <span className="text-sm text-neutral-700 truncate max-w-[120px] font-medium">
+                                        {vaName || 'VA Incharge'}
+                                      </span>
+                                    </div>
+                                  );
+                                })}
                               </div>
-                              <span className="text-sm text-neutral-700 truncate max-w-[120px] font-medium">
-                                {project.vaIncharge?.name || project.vaIncharge}
-                              </span>
-                            </div>
-                          ) : (
-                            <span className="text-sm text-neutral-400">Not assigned</span>
-                          )}
+                            );
+                          })()}
                         </td>
                         <td className="px-6 py-4">
                           {project.assignees && Array.isArray(project.assignees) && project.assignees.length > 0 ? (
@@ -464,15 +676,61 @@ export default function ProjectsTable({
                             <span className="text-sm text-neutral-400">N/A</span>
                           )}
                         </td>
-                        <td className="px-6 py-4">
-                          <button
-                            onClick={() => toggleProjectExpansion(project._id)}
-                            className="text-sm font-medium text-emerald-600 hover:text-emerald-700 transition-colors"
-                          >
-                            {isExpanded ? "Hide" : "Show"} (
-                            {hasFetched ? updates.length : isLoading ? "..." : "?"}
-                            )
-                          </button>
+                        <td className="px-6 py-4 min-w-[300px]">
+                          {(() => {
+                            const update = todayDailyUpdates[project._id];
+                            return update ? (
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-1 text-emerald-600 font-semibold">
+                                  <Clock className="w-3 h-3" />
+                                  <span className="text-xs">{update.hoursWorked}h</span>
+                                </div>
+                                {update.progress > 0 && (
+                                  <div className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-medium">
+                                    {update.progress}%
+                                  </div>
+                                )}
+                              </div>
+                              
+                              {update.tasksCompleted && update.tasksCompleted.length > 0 && (
+                                <div className="text-xs text-neutral-700">
+                                  <span className="font-medium">Tasks:</span>
+                                  <ul className="mt-1 space-y-0.5">
+                                    {update.tasksCompleted.slice(0, 3).map((task, i) => (
+                                      <li key={i} className="truncate">• {task}</li>
+                                    ))}
+                                    {update.tasksCompleted.length > 3 && (
+                                      <li className="text-neutral-500">
+                                        +{update.tasksCompleted.length - 3} more
+                                      </li>
+                                    )}
+                                  </ul>
+                                </div>
+                              )}
+                              
+                              {update.notes && (
+                                <div className="text-xs text-neutral-600 line-clamp-2">
+                                  <span className="font-medium">Notes:</span> {update.notes}
+                                </div>
+                              )}
+                              
+                              {update.challenges && (
+                                <div className="text-xs text-red-600 line-clamp-1">
+                                  <span className="font-medium">Challenges:</span> {update.challenges}
+                                </div>
+                              )}
+                              
+                              {update.nextSteps && (
+                                <div className="text-xs text-neutral-600 line-clamp-1">
+                                  <span className="font-medium">Next Steps:</span> {update.nextSteps}
+                                </div>
+                              )}
+                            </div>
+                            ) : (
+                              <span className="text-sm text-neutral-400">-</span>
+                            );
+                          })()}
                         </td>
                         <td className="px-6 py-4">
                           {project.tags && project.tags.length > 0 ? (
@@ -518,7 +776,7 @@ export default function ProjectsTable({
                       {/* Expanded row for daily updates */}
                       {isExpanded && (
                         <tr>
-                          <td colSpan={12} className="px-6 py-6 bg-neutral-50 border-t border-neutral-200">
+                          <td colSpan={11} className="px-6 py-6 bg-neutral-50 border-t border-neutral-200">
                             <div className="space-y-4">
                               <h4 className="text-lg font-semibold text-neutral-900 mb-4 flex items-center gap-2">
                                 <TrendingUp className="w-5 h-5 text-emerald-600" />

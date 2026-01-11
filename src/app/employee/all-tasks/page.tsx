@@ -24,6 +24,7 @@ import {
   Edit2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import SubtaskModal from "@/components/admin/SubtaskModal";
 
 type TaskKind = "one-time" | "daily" | "weekly" | "monthly" | "recurring" | "custom";
 type TaskStatus = "pending" | "in_progress" | "completed" | "overdue" | "cancelled";
@@ -49,6 +50,8 @@ interface Task {
   deadlineDate?: string;
   deadlineTime?: string;
   priority: number;
+  bonusPoints?: number;
+  penaltyPoints?: number;
   status: TaskStatus;
   order: number;
   createdBy?: string; // User ID of who created the task
@@ -56,6 +59,7 @@ interface Task {
   notApplicable?: boolean; // If true, bonus/penalty points don't apply
   timeSpent?: number; // Time spent on task in hours
   subtasks?: Subtask[];
+  canTick?: boolean; // Whether employee can tick this task
 }
 
 interface Subtask {
@@ -86,6 +90,7 @@ interface Project {
   _id: string;
   projectName: string;
   clientName: string;
+  leadAssignee?: any; // Can be string, ObjectId, array, or object with _id
 }
 
 interface ChecklistItem {
@@ -132,6 +137,11 @@ export default function AllTasksPage() {
   const [tempHours, setTempHours] = useState(0);
   const [tempNotes, setTempNotes] = useState("");
   const [currentDate, setCurrentDate] = useState(new Date());
+  
+  // Subtask modal state
+  const [showSubtaskModal, setShowSubtaskModal] = useState(false);
+  const [selectedTaskForSubtasks, setSelectedTaskForSubtasks] = useState<Task | null>(null);
+  const [selectedProjectForSubtasks, setSelectedProjectForSubtasks] = useState<Project | null>(null);
 
   useEffect(() => {
     if (status === "authenticated") {
@@ -384,20 +394,64 @@ export default function AllTasksPage() {
   };
 
   const handleToggleComplete = async (task: Task) => {
-    // Check if task has incomplete subtasks
-    if (task.subtasks && task.subtasks.length > 0) {
-      const hasIncompleteSubtasks = task.subtasks.some(s => !s.ticked);
-      if (hasIncompleteSubtasks && task.status !== "completed") {
-        alert("Please complete all subtasks before marking this task as complete.");
+    // Only allow ticking if task is assigned to the employee
+    if (task.canTick === false) {
+      alert("You can only tick tasks assigned to you.");
+      return;
+    }
+
+    // Double-check: Verify task is actually assigned to current user before proceeding
+    if (!session?.user?.id) {
+      alert("Unable to verify user. Please refresh the page.");
+      return;
+    }
+
+    const userIdStr = session.user.id.toString();
+    let isAssigned = false;
+
+    // Check assignedTo
+    if (task.assignedTo) {
+      let assignedToId: string | null = null;
+      if (typeof task.assignedTo === 'string') {
+        assignedToId = task.assignedTo;
+      } else if (task.assignedTo && typeof task.assignedTo === 'object') {
+        assignedToId = task.assignedTo._id || task.assignedTo.toString();
+      }
+      if (assignedToId && assignedToId.toString() === userIdStr) {
+        isAssigned = true;
+      }
+    }
+
+    // Check assignees array
+    if (!isAssigned && Array.isArray(task.assignees)) {
+      isAssigned = task.assignees.some((assignee: any) => {
+        const assigneeId = assignee?._id?.toString() || assignee?.toString() || assignee;
+        return assigneeId === userIdStr;
+      });
+    }
+
+    // If not assigned, don't proceed
+    if (!isAssigned) {
+      alert("You can only tick tasks assigned to you.");
+      return;
+    }
+
+    // Check if all subtasks are completed before allowing task completion
+    if (task.status !== "completed" && task.subtasks && task.subtasks.length > 0) {
+      const completedSubtasks = task.subtasks.filter(s => s.ticked).length;
+      const totalSubtasks = task.subtasks.length;
+      
+      if (completedSubtasks < totalSubtasks) {
+        alert(`This task has ${totalSubtasks} subtasks. Complete all subtasks (${completedSubtasks}/${totalSubtasks}) before marking the task as done.`);
         return;
       }
     }
     
     const newStatus = task.status === "completed" ? "pending" : "completed";
     
-    // If completing the task, ask for time spent
+    // If completing the task, ask for time spent (only if task is assigned to user)
     let timeSpent: number | undefined;
-    if (newStatus === "completed") {
+    if (newStatus === "completed" && isAssigned) {
       const timeInput = prompt("How many hours did you spend on this task?");
       if (timeInput === null) {
         return; // User cancelled
@@ -424,13 +478,25 @@ export default function AllTasksPage() {
 
       if (response.ok) {
         await fetchAllTasks();
+      } else {
+        const errorData = await response.json();
+        if (errorData.error) {
+          alert(errorData.error);
+        }
       }
     } catch (error) {
       console.error("Error updating task:", error);
+      alert("Failed to update task. Please try again.");
     }
   };
 
   const handleToggleNotApplicable = async (task: Task) => {
+    // Only allow marking as not applicable if task is assigned to the employee
+    if (task.canTick === false) {
+      alert("You can only mark tasks assigned to you as not applicable.");
+      return;
+    }
+
     const currentNotApplicable = Boolean((task as any).notApplicable);
     const newNotApplicable = !currentNotApplicable;
     
@@ -493,6 +559,49 @@ export default function AllTasksPage() {
     } catch (error) {
       console.error("Error updating subtask:", error);
     }
+  };
+
+  // Handle task click to open subtask modal
+  const handleTaskClick = (task: Task, projectName: string) => {
+    const project = projects.find(p => p.projectName === projectName);
+    if (project) {
+      setSelectedTaskForSubtasks(task);
+      setSelectedProjectForSubtasks(project);
+      setShowSubtaskModal(true);
+    }
+  };
+
+  const handleSubtasksChange = async () => {
+    // Refresh tasks when subtasks change
+    await fetchAllTasks();
+  };
+
+  // Helper function to check if user is lead assignee for a project
+  const isLeadAssigneeForProject = (projectName: string): boolean => {
+    if (!session?.user?.id) return false;
+    const project = projects.find(p => p.projectName === projectName);
+    if (!project || !project.leadAssignee) return false;
+    
+    const userId = session.user.id.toString();
+    
+    // Check if leadAssignee is an array (multiple lead assignees)
+    if (Array.isArray(project.leadAssignee)) {
+      return project.leadAssignee.some((lead: any) => {
+        if (!lead) return false;
+        if (typeof lead === 'string') return lead === userId;
+        if (lead._id) return lead._id.toString() === userId;
+        return lead.toString() === userId;
+      });
+    }
+    
+    // Single lead assignee (legacy support)
+    if (typeof project.leadAssignee === 'string') {
+      return project.leadAssignee === userId;
+    }
+    if (project.leadAssignee._id) {
+      return project.leadAssignee._id.toString() === userId;
+    }
+    return project.leadAssignee.toString() === userId;
   };
 
   const getPriorityColor = (priority: number) => {
@@ -617,7 +726,52 @@ export default function AllTasksPage() {
     ? getProjectNames() 
     : getProjectNames().filter(p => p === projectFilter);
 
-  if (status === "loading" || loading) {
+  // Skeleton Loader Component
+  const TaskSkeleton = () => (
+    <div className="flex items-start gap-2 p-3 bg-white rounded-lg border border-neutral-200 shadow-sm animate-pulse">
+      <div className="flex-shrink-0">
+        <div className="w-5 h-5 bg-neutral-200 rounded-full"></div>
+      </div>
+      <div className="flex-1 min-w-0 space-y-2">
+        <div className="h-4 bg-neutral-200 rounded w-3/4"></div>
+        <div className="h-3 bg-neutral-200 rounded w-1/2"></div>
+        <div className="flex items-center gap-2">
+          <div className="h-3 w-3 bg-neutral-200 rounded"></div>
+          <div className="h-3 w-16 bg-neutral-200 rounded"></div>
+          <div className="h-3 w-20 bg-neutral-200 rounded"></div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const SectionSkeleton = () => (
+    <div className="flex-shrink-0 w-80 min-w-[320px] bg-neutral-50 rounded-xl p-4 border border-neutral-200">
+      <div className="flex items-center justify-between mb-4">
+        <div className="h-5 bg-neutral-200 rounded w-24 animate-pulse"></div>
+      </div>
+      <div className="space-y-2">
+        <TaskSkeleton />
+        <TaskSkeleton />
+        <TaskSkeleton />
+      </div>
+    </div>
+  );
+
+  const ProjectSkeleton = () => (
+    <div className="flex-shrink-0 w-80 min-w-[320px] bg-neutral-50 rounded-xl p-4 border border-neutral-200">
+      <div className="mb-4">
+        <div className="h-5 bg-neutral-200 rounded w-32 animate-pulse mb-2"></div>
+        <div className="h-3 bg-neutral-200 rounded w-16 animate-pulse"></div>
+      </div>
+      <div className="space-y-2">
+        <TaskSkeleton />
+        <TaskSkeleton />
+        <TaskSkeleton />
+      </div>
+    </div>
+  );
+
+  if (status === "loading") {
     return (
       <div className="min-h-screen bg-neutral-50 flex items-center justify-center">
         <div className="w-8 h-8 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin"></div>
@@ -926,173 +1080,6 @@ export default function AllTasksPage() {
                       </span>
                     </div>
                   ))}
-                  
-                  {/* Editable Fields Section */}
-                  <div className="mt-4 pt-4 border-t border-purple-200 space-y-2">
-                    {/* Tasks for the Day Button */}
-                    <div className="relative">
-                      <button
-                        onClick={() => {
-                          if (!dailyUpdate?.adminApproved) {
-                            setTempTasks(dailyUpdate?.tasksForTheDay || '');
-                            setEditingTasksForDay(!editingTasksForDay);
-                            setEditingHours(false);
-                            setEditingNotes(false);
-                          }
-                        }}
-                        disabled={dailyUpdate?.adminApproved}
-                        className={`w-full flex items-center gap-2 p-3 rounded-lg border transition-colors ${
-                          dailyUpdate?.adminApproved
-                            ? 'bg-gray-50 border-gray-200 cursor-not-allowed opacity-50'
-                            : dailyUpdate?.tasksForTheDay
-                            ? 'bg-purple-50 border-purple-300 hover:bg-purple-100'
-                            : 'bg-white border-purple-200 hover:bg-purple-50'
-                        }`}
-                      >
-                        <FileText className="w-4 h-4 text-purple-600 flex-shrink-0" />
-                        <span className="text-sm text-purple-900 font-medium flex-1 text-left truncate">
-                          {dailyUpdate?.tasksForTheDay || 'Tasks for the day'}
-                        </span>
-                      </button>
-                      
-                      {editingTasksForDay && (
-                        <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-lg shadow-lg border border-purple-300 p-3 z-50">
-                          <textarea
-                            value={tempTasks}
-                            onChange={(e) => setTempTasks(e.target.value)}
-                            className="w-full text-sm text-purple-700 bg-white rounded p-2 border border-purple-200 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                            rows={3}
-                            placeholder="Describe your tasks for today..."
-                            autoFocus
-                          />
-                          <div className="flex justify-end gap-2 mt-2">
-                            <button
-                              onClick={() => setEditingTasksForDay(false)}
-                              className="text-xs text-gray-600 hover:text-gray-800 px-2 py-1"
-                            >
-                              Cancel
-                            </button>
-                            <button
-                              onClick={() => handleSaveDailyUpdateField('tasks', tempTasks)}
-                              className="text-xs bg-emerald-600 text-white px-3 py-1 rounded hover:bg-emerald-700"
-                            >
-                              Save
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Hours Worked Button */}
-                    <div className="relative">
-                      <button
-                        onClick={() => {
-                          if (!dailyUpdate?.adminApproved) {
-                            setTempHours(dailyUpdate?.hoursWorked || 0);
-                            setEditingHours(!editingHours);
-                            setEditingTasksForDay(false);
-                            setEditingNotes(false);
-                          }
-                        }}
-                        disabled={dailyUpdate?.adminApproved}
-                        className={`w-full flex items-center gap-2 p-3 rounded-lg border transition-colors ${
-                          dailyUpdate?.adminApproved
-                            ? 'bg-gray-50 border-gray-200 cursor-not-allowed opacity-50'
-                            : dailyUpdate?.hoursWorked
-                            ? 'bg-purple-50 border-purple-300 hover:bg-purple-100'
-                            : 'bg-white border-purple-200 hover:bg-purple-50'
-                        }`}
-                      >
-                        <Clock className="w-4 h-4 text-purple-600 flex-shrink-0" />
-                        <span className="text-sm text-purple-900 font-medium flex-1 text-left">
-                          Hours worked: {dailyUpdate?.hoursWorked || 0}
-                        </span>
-                      </button>
-                      
-                      {editingHours && (
-                        <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-lg shadow-lg border border-purple-300 p-3 z-50">
-                          <input
-                            type="number"
-                            value={tempHours}
-                            onChange={(e) => setTempHours(Number(e.target.value))}
-                            className="w-full text-sm text-purple-700 bg-white rounded p-2 border border-purple-200 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                            min="0"
-                            max="24"
-                            step="0.5"
-                            autoFocus
-                          />
-                          <div className="flex justify-end gap-2 mt-2">
-                            <button
-                              onClick={() => setEditingHours(false)}
-                              className="text-xs text-gray-600 hover:text-gray-800 px-2 py-1"
-                            >
-                              Cancel
-                            </button>
-                            <button
-                              onClick={() => handleSaveDailyUpdateField('hours', tempHours)}
-                              className="text-xs bg-emerald-600 text-white px-3 py-1 rounded hover:bg-emerald-700"
-                            >
-                              Save
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Additional Notes Button */}
-                    <div className="relative">
-                      <button
-                        onClick={() => {
-                          if (!dailyUpdate?.adminApproved) {
-                            setTempNotes(dailyUpdate?.additionalNotes || '');
-                            setEditingNotes(!editingNotes);
-                            setEditingTasksForDay(false);
-                            setEditingHours(false);
-                          }
-                        }}
-                        disabled={dailyUpdate?.adminApproved}
-                        className={`w-full flex items-center gap-2 p-3 rounded-lg border transition-colors ${
-                          dailyUpdate?.adminApproved
-                            ? 'bg-gray-50 border-gray-200 cursor-not-allowed opacity-50'
-                            : dailyUpdate?.additionalNotes
-                            ? 'bg-purple-50 border-purple-300 hover:bg-purple-100'
-                            : 'bg-white border-purple-200 hover:bg-purple-50'
-                        }`}
-                      >
-                        <StickyNote className="w-4 h-4 text-purple-600 flex-shrink-0" />
-                        <span className="text-sm text-purple-900 font-medium flex-1 text-left truncate">
-                          {dailyUpdate?.additionalNotes || 'Additional notes'}
-                        </span>
-                      </button>
-                      
-                      {editingNotes && (
-                        <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-lg shadow-lg border border-purple-300 p-3 z-50">
-                          <textarea
-                            value={tempNotes}
-                            onChange={(e) => setTempNotes(e.target.value)}
-                            className="w-full text-sm text-purple-700 bg-white rounded p-2 border border-purple-200 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                            rows={2}
-                            placeholder="Any additional notes or comments..."
-                            autoFocus
-                          />
-                          <div className="flex justify-end gap-2 mt-2">
-                            <button
-                              onClick={() => setEditingNotes(false)}
-                              className="text-xs text-gray-600 hover:text-gray-800 px-2 py-1"
-                            >
-                              Cancel
-                            </button>
-                            <button
-                              onClick={() => handleSaveDailyUpdateField('notes', tempNotes)}
-                              className="text-xs bg-emerald-600 text-white px-3 py-1 rounded hover:bg-emerald-700"
-                            >
-                              Save
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
                 </>
               );
             })()}
@@ -1102,7 +1089,17 @@ export default function AllTasksPage() {
       )}
 
       {/* Content */}
-      {viewMode === "board" && (
+      {viewMode === "board" && loading && (
+        <div className="w-full overflow-x-auto overflow-y-visible p-6" style={{ scrollbarWidth: 'thin', WebkitOverflowScrolling: 'touch', scrollBehavior: 'smooth' }}>
+          <div className="inline-flex gap-4 min-w-full">
+            <ProjectSkeleton />
+            <ProjectSkeleton />
+            <ProjectSkeleton />
+          </div>
+        </div>
+      )}
+
+      {viewMode === "board" && !loading && (
         <div className="w-full overflow-x-auto overflow-y-visible p-6" style={{ scrollbarWidth: 'thin', WebkitOverflowScrolling: 'touch', scrollBehavior: 'smooth' }}>
           <div className="inline-flex gap-4 min-w-full">
             {/* Daily Updates Board Column */}
@@ -1188,173 +1185,6 @@ export default function AllTasksPage() {
                     ))}
                   </div>
 
-                  {/* Action Buttons - Tasks, Hours, Notes */}
-                  <div className="mt-4 pt-4 border-t border-purple-200 space-y-2">
-                    {/* Tasks for the Day Button */}
-                    <div className="relative">
-                      <button
-                        onClick={() => {
-                          if (!dailyUpdate?.adminApproved) {
-                            setTempTasks(dailyUpdate?.tasksForTheDay || '');
-                            setEditingTasksForDay(!editingTasksForDay);
-                            setEditingHours(false);
-                            setEditingNotes(false);
-                          }
-                        }}
-                        disabled={dailyUpdate?.adminApproved}
-                        className={`w-full flex items-center gap-2 p-2 rounded-lg border transition-colors ${
-                          dailyUpdate?.adminApproved
-                            ? 'bg-gray-50 border-gray-200 cursor-not-allowed opacity-50'
-                            : dailyUpdate?.tasksForTheDay
-                            ? 'bg-purple-50 border-purple-300 hover:bg-purple-100'
-                            : 'bg-white border-purple-200 hover:bg-purple-50'
-                        }`}
-                      >
-                        <FileText className="w-4 h-4 text-purple-600 flex-shrink-0" />
-                        <span className="text-xs text-purple-900 font-medium flex-1 text-left truncate">
-                          {dailyUpdate?.tasksForTheDay || 'Tasks for the day'}
-                        </span>
-                      </button>
-                      
-                      {editingTasksForDay && (
-                        <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-lg shadow-lg border border-purple-300 p-3 z-50">
-                          <textarea
-                            value={tempTasks}
-                            onChange={(e) => setTempTasks(e.target.value)}
-                            className="w-full text-xs text-purple-700 bg-white rounded p-2 border border-purple-200 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                            rows={3}
-                            placeholder="Describe your tasks for today..."
-                            autoFocus
-                          />
-                          <div className="flex justify-end gap-2 mt-2">
-                            <button
-                              onClick={() => setEditingTasksForDay(false)}
-                              className="text-xs text-gray-600 hover:text-gray-800 px-2 py-1"
-                            >
-                              Cancel
-                            </button>
-                            <button
-                              onClick={() => handleSaveDailyUpdateField('tasks', tempTasks)}
-                              className="text-xs bg-emerald-600 text-white px-3 py-1 rounded hover:bg-emerald-700"
-                            >
-                              Save
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Hours Worked Button */}
-                    <div className="relative">
-                      <button
-                        onClick={() => {
-                          if (!dailyUpdate?.adminApproved) {
-                            setTempHours(dailyUpdate?.hoursWorked || 0);
-                            setEditingHours(!editingHours);
-                            setEditingTasksForDay(false);
-                            setEditingNotes(false);
-                          }
-                        }}
-                        disabled={dailyUpdate?.adminApproved}
-                        className={`w-full flex items-center gap-2 p-2 rounded-lg border transition-colors ${
-                          dailyUpdate?.adminApproved
-                            ? 'bg-gray-50 border-gray-200 cursor-not-allowed opacity-50'
-                            : dailyUpdate?.hoursWorked
-                            ? 'bg-purple-50 border-purple-300 hover:bg-purple-100'
-                            : 'bg-white border-purple-200 hover:bg-purple-50'
-                        }`}
-                      >
-                        <Clock className="w-4 h-4 text-purple-600 flex-shrink-0" />
-                        <span className="text-xs text-purple-900 font-medium flex-1 text-left">
-                          Hours worked: {dailyUpdate?.hoursWorked || 0}
-                        </span>
-                      </button>
-                      
-                      {editingHours && (
-                        <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-lg shadow-lg border border-purple-300 p-3 z-50">
-                          <input
-                            type="number"
-                            value={tempHours}
-                            onChange={(e) => setTempHours(Number(e.target.value))}
-                            className="w-full text-sm text-purple-700 bg-white rounded p-2 border border-purple-200 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                            min="0"
-                            max="24"
-                            step="0.5"
-                            autoFocus
-                          />
-                          <div className="flex justify-end gap-2 mt-2">
-                            <button
-                              onClick={() => setEditingHours(false)}
-                              className="text-xs text-gray-600 hover:text-gray-800 px-2 py-1"
-                            >
-                              Cancel
-                            </button>
-                            <button
-                              onClick={() => handleSaveDailyUpdateField('hours', tempHours)}
-                              className="text-xs bg-emerald-600 text-white px-3 py-1 rounded hover:bg-emerald-700"
-                            >
-                              Save
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Additional Notes Button */}
-                    <div className="relative">
-                      <button
-                        onClick={() => {
-                          if (!dailyUpdate?.adminApproved) {
-                            setTempNotes(dailyUpdate?.additionalNotes || '');
-                            setEditingNotes(!editingNotes);
-                            setEditingTasksForDay(false);
-                            setEditingHours(false);
-                          }
-                        }}
-                        disabled={dailyUpdate?.adminApproved}
-                        className={`w-full flex items-center gap-2 p-2 rounded-lg border transition-colors ${
-                          dailyUpdate?.adminApproved
-                            ? 'bg-gray-50 border-gray-200 cursor-not-allowed opacity-50'
-                            : dailyUpdate?.additionalNotes
-                            ? 'bg-purple-50 border-purple-300 hover:bg-purple-100'
-                            : 'bg-white border-purple-200 hover:bg-purple-50'
-                        }`}
-                      >
-                        <StickyNote className="w-4 h-4 text-purple-600 flex-shrink-0" />
-                        <span className="text-xs text-purple-900 font-medium flex-1 text-left truncate">
-                          {dailyUpdate?.additionalNotes || 'Additional notes'}
-                        </span>
-                      </button>
-                      
-                      {editingNotes && (
-                        <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-lg shadow-lg border border-purple-300 p-3 z-50">
-                          <textarea
-                            value={tempNotes}
-                            onChange={(e) => setTempNotes(e.target.value)}
-                            className="w-full text-xs text-purple-700 bg-white rounded p-2 border border-purple-200 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                            rows={2}
-                            placeholder="Any additional notes or comments..."
-                            autoFocus
-                          />
-                          <div className="flex justify-end gap-2 mt-2">
-                            <button
-                              onClick={() => setEditingNotes(false)}
-                              className="text-xs text-gray-600 hover:text-gray-800 px-2 py-1"
-                            >
-                              Cancel
-                            </button>
-                            <button
-                              onClick={() => handleSaveDailyUpdateField('notes', tempNotes)}
-                              className="text-xs bg-emerald-600 text-white px-3 py-1 rounded hover:bg-emerald-700"
-                            >
-                              Save
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
 
                 </div>
               );
@@ -1388,123 +1218,154 @@ export default function AllTasksPage() {
                           {section}
                         </div>
                         <div className="space-y-2">
-                          {filtered.map((task) => (
-                            <motion.div
-                              key={task._id}
-                              initial={{ opacity: 0, y: -10 }}
-                              animate={{ opacity: 1, y: 0 }}
-                              className="bg-white rounded-lg border border-neutral-200 p-3 hover:shadow-md transition-shadow cursor-pointer group"
-                              onClick={() => handleToggleComplete(task)}
-                            >
-                              <div className="flex items-start gap-2 min-w-0">
-                                <div className="flex items-center gap-0.5 mt-0.5 flex-shrink-0">
-                                  <button
+                          {filtered.map((task) => {
+                            const isNotApplicable = Boolean((task as any).notApplicable);
+                            const isOverdue = task.deadlineDate ? new Date(task.deadlineDate) < new Date() && task.status !== "completed" : false;
+                            
+                            return (
+                              <motion.div
+                                key={task._id}
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                className={`flex items-start gap-2 p-3 bg-white rounded-lg border border-neutral-200 shadow-sm group min-w-0 ${
+                                  task.status === "completed" ? "opacity-70" : ""
+                                } ${isNotApplicable ? "bg-gray-50 border-gray-300" : ""} ${
+                                  isOverdue ? "border-red-300 bg-red-50" : ""
+                                }`}
+                              >
+                                <div className="flex-shrink-0 flex items-center gap-0.5">
+                                  <button 
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       handleToggleComplete(task);
                                     }}
+                                    disabled={task.canTick === false}
+                                    title={task.canTick === false ? "You can only tick tasks assigned to you" : ""}
                                     className="flex-shrink-0"
                                   >
                                     {task.status === "completed" ? (
-                                      <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                                      <CheckCircle2 className="w-5 h-5 text-emerald-500" />
                                     ) : (
-                                      <Circle className="w-5 h-5 text-neutral-400 hover:text-emerald-600" />
+                                      <Circle className={`w-5 h-5 transition-colors ${
+                                        task.canTick === false 
+                                          ? "text-neutral-300 cursor-not-allowed" 
+                                          : "text-neutral-400 hover:text-emerald-500"
+                                      }`} />
                                     )}
                                   </button>
-                                  {task.status !== "completed" && (
+                                  {task.canTick !== false && task.status !== "completed" && (
                                     <button
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         handleToggleNotApplicable(task);
                                       }}
                                       className={`flex-shrink-0 px-1.5 py-0.5 text-[10px] font-bold rounded border ${
-                                        (task as any).notApplicable 
+                                        isNotApplicable 
                                           ? "bg-purple-500 border-purple-600 text-white shadow-sm hover:bg-purple-600 active:bg-purple-700" 
                                           : "bg-white border-gray-300 text-gray-600 hover:bg-gray-50 hover:border-gray-400 active:bg-gray-100"
                                       }`}
-                                      title={(task as any).notApplicable ? "Mark as applicable (bonus/penalty will apply)" : "Mark as not applicable (bonus/penalty won't apply)"}
+                                      title={isNotApplicable ? "Mark as applicable (bonus/penalty will apply)" : "Mark as not applicable (bonus/penalty won't apply)"}
                                     >
-                                      {(task as any).notApplicable ? "✓" : "NA"}
+                                      {isNotApplicable ? "✓" : "NA"}
                                     </button>
                                   )}
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                  <div className={`text-sm font-medium truncate ${
-                                    task.status === "completed" ? "line-through text-neutral-400" : 
-                                    (task as any).notApplicable ? "text-gray-500" : 
-                                    "text-neutral-900"
-                                  }`}>
-                                    {task.title}
-                                  </div>
-                                  {task.description && (
-                                    <div className="text-xs text-neutral-500 mt-1 line-clamp-2">
-                                      {task.description}
-                                    </div>
-                                  )}
-                                  
-                                  {/* Subtasks Section */}
-                                  {task.subtasks && task.subtasks.length > 0 && (
-                                    <div className="mt-3 pl-4 border-l-2 border-neutral-200">
-                                      <div className="text-xs font-semibold text-neutral-600 mb-2">Subtasks</div>
-                                      {task.subtasks.map((subtask) => (
-                                        <div key={subtask._id} className="flex items-start gap-1.5 mb-2 min-w-0">
-                                          <button
-                                            onClick={() => handleToggleSubtask(subtask._id, subtask.ticked)}
-                                            className="mt-0.5 flex-shrink-0"
-                                          >
-                                            {subtask.ticked ? (
-                                              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                                            ) : (
-                                              <Circle className="w-4 h-4 text-neutral-400 hover:text-emerald-600" />
-                                            )}
-                                          </button>
-                                          <div className="flex-1 min-w-0">
-                                            <div className={`text-xs truncate ${subtask.ticked ? "line-through text-neutral-400" : "text-neutral-700"}`}>
-                                              {subtask.title}
-                                            </div>
-                                            {subtask.assigneeName && (
-                                              <div className="text-xs text-neutral-400 mt-0.5">
-                                                <User className="w-3 h-3 inline mr-1" />
-                                                {subtask.assigneeName}
-                                              </div>
-                                            )}
-                                          </div>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  )}
-                                  
-                                  <div className="flex items-center gap-2 mt-2 flex-wrap">
-                                    {task.priority > 0 && (
-                                      <Flag className={`w-3 h-3 ${getPriorityColor(task.priority)}`} />
-                                    )}
-                                    {(task.deadlineDate || task.dueDate) && (
-                                      <div className="flex items-center gap-1 text-xs text-neutral-500">
-                                        <Clock className="w-3 h-3" />
-                                        <span>{formatDate(task.deadlineDate || task.dueDate)}</span>
-                                      </div>
-                                    )}
-                                    {task.assignedTo && (
-                                      <div className="flex items-center gap-1 text-xs text-neutral-500">
-                                        <User className="w-3 h-3" />
-                                        <span>{task.assignedTo.name}</span>
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                                {/* Edit and Delete buttons - only show if user created the task */}
-                                {(task as any).createdBy && session?.user?.id && (task as any).createdBy === session.user.id && (
-                                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <div className="flex items-center gap-2 flex-wrap">
                                     <button
                                       onClick={(e) => {
                                         e.stopPropagation();
-                                        alert('Edit functionality coming soon');
+                                        if (task.subtasks && task.subtasks.length > 0) {
+                                          handleTaskClick(task, projectName);
+                                        }
                                       }}
-                                      className="p-1.5 hover:bg-neutral-100 rounded transition-all"
-                                      title="Edit task"
+                                      className={`font-medium text-neutral-800 text-left hover:underline cursor-pointer truncate ${
+                                        task.status === "completed" ? "line-through text-neutral-500" : ""
+                                      } ${isNotApplicable ? "text-gray-500" : ""}`}
                                     >
-                                      <Edit2 className="w-4 h-4 text-neutral-500" />
+                                      {task.title}
                                     </button>
+                                    {/* Subtask Indicator Badge */}
+                                    {task.subtasks && task.subtasks.length > 0 && (
+                                      <span 
+                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700 cursor-pointer hover:bg-blue-200" 
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleTaskClick(task, projectName);
+                                        }}
+                                      >
+                                        <FileText className="w-3 h-3" />
+                                        {task.subtasks.filter(s => s.ticked).length}/{task.subtasks.length}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {task.description && (
+                                    <p className="text-xs text-neutral-500 mt-0.5">{task.description}</p>
+                                  )}
+                                  
+                                  <div className="flex items-center gap-2 text-xs mt-1 text-neutral-500 flex-wrap">
+                                    {/* Show assigned to label */}
+                                    {task.assignedTo && (
+                                      <span className="flex items-center gap-1 text-blue-600 font-medium">
+                                        <User className="w-3 h-3" />
+                                        {typeof task.assignedTo === 'object' ? task.assignedTo.name : 'Assigned'}
+                                      </span>
+                                    )}
+                                    {task.assignees && Array.isArray(task.assignees) && task.assignees.length > 0 && !task.assignedTo && (
+                                      <span className="flex items-center gap-1 text-blue-600 font-medium">
+                                        <User className="w-3 h-3" />
+                                        {task.assignees.map((a: any) => typeof a === 'object' ? a.name : a).join(', ')}
+                                      </span>
+                                    )}
+                                    {(!task.assignedTo && (!task.assignees || task.assignees.length === 0)) && (
+                                      <span className="flex items-center gap-1 text-neutral-400 italic">
+                                        <User className="w-3 h-3" />
+                                        Unassigned
+                                      </span>
+                                    )}
+                                    {(task.dueDate || task.deadlineDate) && (
+                                      <span
+                                        className={`flex items-center gap-1 ${
+                                          isOverdue ? "text-red-500 font-semibold" : ""
+                                        }`}
+                                      >
+                                        <Clock className="w-3 h-3" />{" "}
+                                        {formatDate(task.dueDate || task.deadlineDate)}
+                                        {task.dueTime && ` at ${task.dueTime}`}
+                                      </span>
+                                    )}
+                                    <span className={`flex items-center gap-1 ${getPriorityColor(task.priority)}`}>
+                                      <Flag className="w-3 h-3" /> P{task.priority}
+                                    </span>
+                                    {!isNotApplicable && task.bonusPoints && task.bonusPoints > 0 && (
+                                      <span className="flex items-center gap-1 text-emerald-600">
+                                        +{task.bonusPoints} pts
+                                      </span>
+                                    )}
+                                    {!isNotApplicable && task.penaltyPoints && task.penaltyPoints > 0 && (
+                                      <span className="flex items-center gap-1 text-red-600">
+                                        -{task.penaltyPoints} pts
+                                      </span>
+                                    )}
+                                    {isNotApplicable && (
+                                      <span className="flex items-center gap-1 text-gray-500 italic text-xs">
+                                        Bonus/Penalty N/A
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      alert('Edit functionality coming soon');
+                                    }}
+                                    className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-neutral-100 rounded transition-all"
+                                    title="Edit task"
+                                  >
+                                    <Edit2 className="w-4 h-4 text-neutral-500" />
+                                  </button>
+                                  {(isLeadAssigneeForProject(projectName) || ((task as any).createdBy && session?.user?.id && (task as any).createdBy === session.user.id)) && (
                                     <button
                                       onClick={(e) => {
                                         e.stopPropagation();
@@ -1512,16 +1373,16 @@ export default function AllTasksPage() {
                                           handleDeleteTask(task._id);
                                         }
                                       }}
-                                      className="p-1.5 hover:bg-red-50 text-red-500 hover:text-red-600 rounded transition-all"
-                                      title="Delete task"
+                                      className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-red-50 text-red-500 hover:text-red-600 rounded transition-all"
+                                      title={isLeadAssigneeForProject(projectName) ? "Delete task (lead assignee)" : "Delete task (only tasks you created)"}
                                     >
                                       <Trash2 className="w-4 h-4" />
                                     </button>
-                                  </div>
-                                )}
-                              </div>
-                            </motion.div>
-                          ))}
+                                  )}
+                                </div>
+                              </motion.div>
+                            );
+                          })}
                         </div>
                       </div>
                     );
@@ -1533,7 +1394,21 @@ export default function AllTasksPage() {
         </div>
       )}
 
-      {viewMode === "list" && (
+      {viewMode === "list" && loading && (
+        <div className="max-w-7xl mx-auto p-6 space-y-6">
+          <div className="mb-8">
+            <div className="h-6 bg-neutral-200 rounded w-48 animate-pulse mb-4"></div>
+            <div className="space-y-2">
+              <TaskSkeleton />
+              <TaskSkeleton />
+              <TaskSkeleton />
+              <TaskSkeleton />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {viewMode === "list" && !loading && (
         <div className="max-w-7xl mx-auto p-6">
           {filteredProjects.map((projectName) => {
             const projectTasks = tasks[projectName] || {};
@@ -1556,93 +1431,154 @@ export default function AllTasksPage() {
                         {section}
                       </div>
                       <div className="space-y-2">
-                        {filtered.map((task) => (
-                          <motion.div
-                            key={task._id}
-                            initial={{ opacity: 0, x: -10 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            className="bg-white rounded-lg border border-neutral-200 p-4 hover:shadow-md transition-shadow cursor-pointer group"
-                            onClick={() => handleToggleComplete(task)}
-                          >
-                            <div className="flex items-start gap-2 min-w-0">
-                              <div className="flex items-center gap-0.5 mt-0.5 flex-shrink-0">
-                                <button
+                        {filtered.map((task) => {
+                          const isNotApplicable = Boolean((task as any).notApplicable);
+                          const isOverdue = task.deadlineDate ? new Date(task.deadlineDate) < new Date() && task.status !== "completed" : false;
+                          
+                          return (
+                            <motion.div
+                              key={task._id}
+                              initial={{ opacity: 0, x: -10 }}
+                              animate={{ opacity: 1, x: 0 }}
+                              className={`flex items-start gap-2 p-4 bg-white rounded-lg border border-neutral-200 shadow-sm group min-w-0 ${
+                                task.status === "completed" ? "opacity-70" : ""
+                              } ${isNotApplicable ? "bg-gray-50 border-gray-300" : ""} ${
+                                isOverdue ? "border-red-300 bg-red-50" : ""
+                              }`}
+                            >
+                              <div className="flex-shrink-0 flex items-center gap-0.5">
+                                <button 
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     handleToggleComplete(task);
                                   }}
+                                  disabled={task.canTick === false}
+                                  title={task.canTick === false ? "You can only tick tasks assigned to you" : ""}
                                   className="flex-shrink-0"
                                 >
                                   {task.status === "completed" ? (
-                                    <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                                    <CheckCircle2 className="w-5 h-5 text-emerald-500" />
                                   ) : (
-                                    <Circle className="w-5 h-5 text-neutral-400 hover:text-emerald-600" />
+                                    <Circle className={`w-5 h-5 transition-colors ${
+                                      task.canTick === false 
+                                        ? "text-neutral-300 cursor-not-allowed" 
+                                        : "text-neutral-400 hover:text-emerald-500"
+                                    }`} />
                                   )}
                                 </button>
-                                {task.status !== "completed" && (
+                                {task.canTick !== false && task.status !== "completed" && (
                                   <button
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       handleToggleNotApplicable(task);
                                     }}
                                     className={`flex-shrink-0 px-1.5 py-0.5 text-[10px] font-bold rounded border ${
-                                      (task as any).notApplicable 
+                                      isNotApplicable 
                                         ? "bg-purple-500 border-purple-600 text-white shadow-sm hover:bg-purple-600 active:bg-purple-700" 
                                         : "bg-white border-gray-300 text-gray-600 hover:bg-gray-50 hover:border-gray-400 active:bg-gray-100"
                                     }`}
-                                    title={(task as any).notApplicable ? "Mark as applicable (bonus/penalty will apply)" : "Mark as not applicable (bonus/penalty won't apply)"}
+                                    title={isNotApplicable ? "Mark as applicable (bonus/penalty will apply)" : "Mark as not applicable (bonus/penalty won't apply)"}
                                   >
-                                    {(task as any).notApplicable ? "✓" : "NA"}
+                                    {isNotApplicable ? "✓" : "NA"}
                                   </button>
                                 )}
                               </div>
                               <div className="flex-1 min-w-0">
-                                <div className={`text-base font-medium truncate ${
-                                  task.status === "completed" ? "line-through text-neutral-400" : 
-                                  (task as any).notApplicable ? "text-gray-500" : 
-                                  "text-neutral-900"
-                                }`}>
-                                  {task.title}
-                                </div>
-                                {task.description && (
-                                  <div className="text-sm text-neutral-500 mt-1">
-                                    {task.description}
-                                  </div>
-                                )}
-                                <div className="flex items-center gap-4 mt-3 flex-wrap">
-                                  {task.priority > 0 && (
-                                    <div className="flex items-center gap-1">
-                                      <Flag className={`w-4 h-4 ${getPriorityColor(task.priority)}`} />
-                                      <span className="text-xs text-neutral-500">P{task.priority}</span>
-                                    </div>
-                                  )}
-                                  {(task.deadlineDate || task.dueDate) && (
-                                    <div className="flex items-center gap-1 text-sm text-neutral-500">
-                                      <Clock className="w-4 h-4" />
-                                      <span>{formatDate(task.deadlineDate || task.dueDate)}</span>
-                                    </div>
-                                  )}
-                                  {task.assignedTo && (
-                                    <div className="flex items-center gap-1 text-sm text-neutral-500">
-                                      <User className="w-4 h-4" />
-                                      <span>{task.assignedTo.name}</span>
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                              {/* Edit and Delete buttons - only show if user created the task */}
-                              {(task as any).createdBy && session?.user?.id && (task as any).createdBy === session.user.id && (
-                                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <div className="flex items-center gap-2 flex-wrap">
                                   <button
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      alert('Edit functionality coming soon');
+                                      if (task.subtasks && task.subtasks.length > 0) {
+                                        handleTaskClick(task, projectName);
+                                      }
                                     }}
-                                    className="p-1.5 hover:bg-neutral-100 rounded transition-all"
-                                    title="Edit task"
+                                    className={`font-medium text-neutral-800 text-left hover:underline cursor-pointer truncate ${
+                                      task.status === "completed" ? "line-through text-neutral-500" : ""
+                                    } ${isNotApplicable ? "text-gray-500" : ""}`}
                                   >
-                                    <Edit2 className="w-4 h-4 text-neutral-500" />
+                                    {task.title}
                                   </button>
+                                  {/* Subtask Indicator Badge */}
+                                  {task.subtasks && task.subtasks.length > 0 && (
+                                    <span 
+                                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700 cursor-pointer hover:bg-blue-200" 
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleTaskClick(task, projectName);
+                                      }}
+                                    >
+                                      <FileText className="w-3 h-3" />
+                                      {task.subtasks.filter(s => s.ticked).length}/{task.subtasks.length}
+                                    </span>
+                                  )}
+                                </div>
+                                {task.description && (
+                                  <p className="text-xs text-neutral-500 mt-0.5">{task.description}</p>
+                                )}
+                                
+                                <div className="flex items-center gap-2 text-xs mt-1 text-neutral-500 flex-wrap">
+                                  {/* Show assigned to label */}
+                                  {task.assignedTo && (
+                                    <span className="flex items-center gap-1 text-blue-600 font-medium">
+                                      <User className="w-3 h-3" />
+                                      {typeof task.assignedTo === 'object' ? task.assignedTo.name : 'Assigned'}
+                                    </span>
+                                  )}
+                                  {task.assignees && Array.isArray(task.assignees) && task.assignees.length > 0 && !task.assignedTo && (
+                                    <span className="flex items-center gap-1 text-blue-600 font-medium">
+                                      <User className="w-3 h-3" />
+                                      {task.assignees.map((a: any) => typeof a === 'object' ? a.name : a).join(', ')}
+                                    </span>
+                                  )}
+                                  {(!task.assignedTo && (!task.assignees || task.assignees.length === 0)) && (
+                                    <span className="flex items-center gap-1 text-neutral-400 italic">
+                                      <User className="w-3 h-3" />
+                                      Unassigned
+                                    </span>
+                                  )}
+                                  {(task.dueDate || task.deadlineDate) && (
+                                    <span
+                                      className={`flex items-center gap-1 ${
+                                        isOverdue ? "text-red-500 font-semibold" : ""
+                                      }`}
+                                    >
+                                      <Clock className="w-3 h-3" />{" "}
+                                      {formatDate(task.dueDate || task.deadlineDate)}
+                                      {task.dueTime && ` at ${task.dueTime}`}
+                                    </span>
+                                  )}
+                                  <span className={`flex items-center gap-1 ${getPriorityColor(task.priority)}`}>
+                                    <Flag className="w-3 h-3" /> P{task.priority}
+                                  </span>
+                                  {!isNotApplicable && (task as any).bonusPoints && (task as any).bonusPoints > 0 && (
+                                    <span className="flex items-center gap-1 text-emerald-600">
+                                      +{(task as any).bonusPoints} pts
+                                    </span>
+                                  )}
+                                  {!isNotApplicable && (task as any).penaltyPoints && (task as any).penaltyPoints > 0 && (
+                                    <span className="flex items-center gap-1 text-red-600">
+                                      -{(task as any).penaltyPoints} pts
+                                    </span>
+                                  )}
+                                  {isNotApplicable && (
+                                    <span className="flex items-center gap-1 text-gray-500 italic text-xs">
+                                      Bonus/Penalty N/A
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    alert('Edit functionality coming soon');
+                                  }}
+                                  className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-neutral-100 rounded transition-all"
+                                  title="Edit task"
+                                >
+                                  <Edit2 className="w-4 h-4 text-neutral-500" />
+                                </button>
+                                {(task as any).createdBy && session?.user?.id && (task as any).createdBy === session.user.id && (
                                   <button
                                     onClick={(e) => {
                                       e.stopPropagation();
@@ -1650,16 +1586,16 @@ export default function AllTasksPage() {
                                         handleDeleteTask(task._id);
                                       }
                                     }}
-                                    className="p-1.5 hover:bg-red-50 text-red-500 hover:text-red-600 rounded transition-all"
-                                    title="Delete task"
+                                    className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-red-50 text-red-500 hover:text-red-600 rounded transition-all"
+                                    title="Delete task (only tasks you created)"
                                   >
                                     <Trash2 className="w-4 h-4" />
                                   </button>
-                                </div>
-                              )}
-                            </div>
-                          </motion.div>
-                        ))}
+                                )}
+                              </div>
+                            </motion.div>
+                          );
+                        })}
                       </div>
                     </div>
                   );
@@ -1682,10 +1618,40 @@ export default function AllTasksPage() {
             formatDate={formatDate}
             currentDate={currentDate}
             setCurrentDate={setCurrentDate}
+            onTaskClick={(task) => {
+              // Find project for this task
+              for (const [projectName, projectTasks] of Object.entries(tasks)) {
+                for (const sectionTasks of Object.values(projectTasks)) {
+                  if (sectionTasks.some(t => t._id === task._id)) {
+                    handleTaskClick(task, projectName);
+                    return;
+                  }
+                }
+              }
+            }}
           />
         </div>
       )}
 
+      {/* Subtask Modal */}
+      {showSubtaskModal && selectedTaskForSubtasks && selectedProjectForSubtasks && (
+        <SubtaskModal
+          isOpen={showSubtaskModal}
+          onClose={() => {
+            setShowSubtaskModal(false);
+            setSelectedTaskForSubtasks(null);
+            setSelectedProjectForSubtasks(null);
+          }}
+          taskId={selectedTaskForSubtasks._id}
+          taskTitle={selectedTaskForSubtasks.title}
+          projectId={selectedProjectForSubtasks._id}
+          projectEmployees={[]} // TODO: Fetch project employees if needed
+          currentUserId={session?.user?.id || ""}
+          isLeadAssignee={isLeadAssigneeForProject(selectedProjectForSubtasks.projectName)}
+          isAdmin={false}
+          onSubtasksChange={handleSubtasksChange}
+        />
+      )}
     </div>
   );
 }
@@ -1698,6 +1664,7 @@ function CalendarView({
   formatDate,
   currentDate,
   setCurrentDate,
+  onTaskClick,
 }: {
   tasks: Task[];
   filteredTasks: (tasks: Task[]) => Task[];
@@ -1705,6 +1672,7 @@ function CalendarView({
   formatDate: (date?: string) => string;
   currentDate: Date;
   setCurrentDate: (date: Date) => void;
+  onTaskClick?: (task: Task) => void;
 }) {
   const filtered = filteredTasks(tasks);
 
@@ -1821,6 +1789,12 @@ function CalendarView({
                 {dateTasks.slice(0, 3).map((task) => (
                   <div
                     key={task._id}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (onTaskClick && task.subtasks && task.subtasks.length > 0) {
+                        onTaskClick(task);
+                      }
+                    }}
                     className={`text-xs px-1.5 py-0.5 rounded truncate cursor-pointer hover:opacity-80 ${
                       task.status === "completed" ? "bg-neutral-200 text-neutral-600 line-through" : "bg-emerald-100 text-emerald-700"
                     }`}

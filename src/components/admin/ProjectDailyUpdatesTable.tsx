@@ -195,12 +195,75 @@ export default function ProjectDailyUpdatesTable() {
     });
   };
 
+  // Table Skeleton Loader
+  const TableRowSkeleton = () => (
+    <tr className="hover:bg-neutral-50 transition-colors animate-pulse">
+      <td className="sticky left-0 bg-white px-6 py-4 border-r border-neutral-200 z-10">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-neutral-200 rounded-full"></div>
+          <div className="space-y-2">
+            <div className="h-4 bg-neutral-200 rounded w-32"></div>
+            <div className="h-3 bg-neutral-200 rounded w-40"></div>
+          </div>
+        </div>
+      </td>
+      {[1, 2, 3, 4, 5].map((i) => (
+        <td key={i} className="px-4 py-4 border-r border-neutral-200">
+          <div className="space-y-2">
+            <div className="h-3 bg-neutral-200 rounded w-16 mx-auto"></div>
+            <div className="h-20 bg-neutral-100 rounded"></div>
+          </div>
+        </td>
+      ))}
+    </tr>
+  );
+
   if (loading && projects.length === 0) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <div className="text-center">
-          <div className="inline-block w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
-          <p className="mt-4 text-neutral-600">Loading project updates...</p>
+      <div className="space-y-6">
+        {/* Filters Skeleton */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-pulse">
+          <div className="flex flex-col gap-6">
+            <div className="flex flex-col md:flex-row gap-4">
+              <div className="flex-1">
+                <div className="h-4 bg-neutral-200 rounded w-24 mb-2"></div>
+                <div className="h-12 bg-neutral-200 rounded-xl"></div>
+              </div>
+              <div className="flex-1">
+                <div className="h-4 bg-neutral-200 rounded w-32 mb-2"></div>
+                <div className="h-12 bg-neutral-200 rounded-xl"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Table Skeleton */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-neutral-50 border-b border-neutral-200">
+                <tr>
+                  <th className="sticky left-0 bg-neutral-50 px-6 py-4 text-left text-xs font-semibold text-neutral-700 uppercase tracking-wider border-r border-neutral-200 z-10 min-w-[220px]">
+                    Employee
+                  </th>
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <th key={i} className="px-4 py-4 text-center text-xs font-semibold text-neutral-700 uppercase tracking-wider min-w-[220px] border-r border-neutral-200">
+                      <div className="flex flex-col items-center gap-1">
+                        <div className="w-3 h-3 bg-neutral-200 rounded"></div>
+                        <div className="h-3 bg-neutral-200 rounded w-20"></div>
+                      </div>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-neutral-200">
+                <TableRowSkeleton />
+                <TableRowSkeleton />
+                <TableRowSkeleton />
+                <TableRowSkeleton />
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     );

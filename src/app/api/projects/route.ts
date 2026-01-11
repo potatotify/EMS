@@ -43,7 +43,8 @@ export async function GET(request: NextRequest) {
           $or: [
             {leadAssignee: userId}, // Single lead assignee (legacy)
             {leadAssignee: {$in: [userId]}}, // Multiple lead assignees (array)
-            {vaIncharge: userId},
+            {vaIncharge: userId}, // Single VA incharge (legacy)
+            {vaIncharge: {$in: [userId]}}, // Multiple VA incharges (array)
             {assignees: userId} // Check if user is in assignees array
           ]
         })
@@ -92,9 +93,19 @@ export async function GET(request: NextRequest) {
             project.leadAssignee = await populateEmployee(project.leadAssignee) || project.leadAssignee;
           }
         }
-        // Populate VA Incharge
+        // Populate VA Incharge (can be single or array)
         if (project.vaIncharge) {
-          project.vaIncharge = await populateEmployee(project.vaIncharge) || project.vaIncharge;
+          if (Array.isArray(project.vaIncharge)) {
+            // Multiple VA incharges
+            project.vaIncharge = await Promise.all(
+              project.vaIncharge.map(async (vaId: any) => {
+                return await populateEmployee(vaId) || vaId;
+              })
+            );
+          } else {
+            // Single VA incharge (legacy support)
+            project.vaIncharge = await populateEmployee(project.vaIncharge) || project.vaIncharge;
+          }
         }
         // Populate Assignees array
         if (project.assignees && Array.isArray(project.assignees)) {

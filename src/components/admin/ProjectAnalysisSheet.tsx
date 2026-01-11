@@ -171,7 +171,13 @@ export default function ProjectAnalysisSheet() {
         }
         return leadAssignee.name || "Unassigned";
       })(),
-      p.vaIncharge?.name || "N/A",
+      (() => {
+        if (!p.vaIncharge) return "N/A";
+        if (Array.isArray(p.vaIncharge)) {
+          return p.vaIncharge.map((va: any) => va?.name || 'Unknown').join(', ') || "N/A";
+        }
+        return p.vaIncharge?.name || "N/A";
+      })(),
       p.updateIncharge?.name || "N/A",
       p.tags?.join(", ") || ""
     ]);
@@ -201,10 +207,129 @@ export default function ProjectAnalysisSheet() {
       : 0
   };
 
+  // Table Row Skeleton
+  const ProjectRowSkeleton = () => (
+    <tr className="hover:bg-neutral-50 transition-colors animate-pulse">
+      <td className="px-4 py-3 sticky left-0 bg-white border-r border-neutral-200 z-10">
+        <div className="h-4 bg-neutral-200 rounded w-32"></div>
+      </td>
+      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20].map((i) => (
+        <td key={i} className="px-4 py-3 border-r border-neutral-200">
+          <div className="h-4 bg-neutral-200 rounded w-20"></div>
+        </td>
+      ))}
+    </tr>
+  );
+
   if (loading) {
     return (
-      <div className="flex justify-center items-center py-12">
-        <RefreshCw className="w-8 h-8 animate-spin text-emerald-600" />
+      <div className="space-y-6">
+        {/* Header Actions Skeleton */}
+        <div className="flex items-center justify-between flex-wrap gap-4 animate-pulse">
+          <div className="flex items-center gap-4 flex-1">
+            <div className="relative flex-1 max-w-md">
+              <div className="h-10 bg-neutral-200 rounded-lg"></div>
+            </div>
+            <div className="h-10 bg-neutral-200 rounded-lg w-32"></div>
+            <div className="h-10 bg-neutral-200 rounded-lg w-32"></div>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="h-10 bg-neutral-200 rounded-lg w-24"></div>
+            <div className="h-10 bg-neutral-200 rounded-lg w-28"></div>
+          </div>
+        </div>
+
+        {/* Summary Stats Skeleton */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 animate-pulse">
+          {[1, 2, 3, 4, 5, 6].map((i) => (
+            <div key={i} className="bg-white p-4 rounded-xl shadow-sm border border-neutral-200">
+              <div className="h-4 bg-neutral-200 rounded w-24 mb-2"></div>
+              <div className="h-8 bg-neutral-200 rounded w-12"></div>
+            </div>
+          ))}
+        </div>
+
+        {/* Table Skeleton */}
+        <div className="bg-white rounded-xl shadow-sm border border-neutral-200 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[2000px]">
+              <thead className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider sticky left-0 bg-gradient-to-r from-emerald-600 to-teal-600 z-10">
+                    Project Name
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
+                    Client
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
+                    Status
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
+                    Priority
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
+                    Progress
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
+                    Days Overdue
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
+                    Lead Assignee
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
+                    VA Incharge
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
+                    Update Incharge
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
+                    Assignees
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
+                    Created At
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
+                    Updated At
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
+                    Start Date
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
+                    End Date
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
+                    Budget
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
+                    Total Tasks
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
+                    Completed Tasks
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
+                    Pending Tasks
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
+                    In Progress Tasks
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
+                    Overdue Tasks
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider">
+                    Completion Rate
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-neutral-200">
+                <ProjectRowSkeleton />
+                <ProjectRowSkeleton />
+                <ProjectRowSkeleton />
+                <ProjectRowSkeleton />
+                <ProjectRowSkeleton />
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
     );
   }
@@ -440,7 +565,13 @@ export default function ProjectAnalysisSheet() {
                         })()}
                       </td>
                       <td className="px-4 py-3 text-sm text-neutral-600">
-                        {project.vaIncharge?.name || "N/A"}
+                        {(() => {
+                          if (!project.vaIncharge) return "N/A";
+                          if (Array.isArray(project.vaIncharge)) {
+                            return project.vaIncharge.map((va: any) => va?.name || 'Unknown').join(', ') || "N/A";
+                          }
+                          return project.vaIncharge?.name || "N/A";
+                        })()}
                       </td>
                       <td className="px-4 py-3 text-sm text-neutral-600">
                         {project.updateIncharge?.name || "N/A"}

@@ -95,14 +95,16 @@ export async function GET(
         date: record.date,
         workDetails: record.workDetails || "",
         status: record.status || "present",
-        createdAt: record.createdAt || record.date
+        createdAt: record.createdAt || record.date,
+        hoursWorked: record.hoursWorked || 0
       })),
       dailyUpdates: dailyUpdates.map((update: any) => ({
         _id: update._id,
         date: update.date,
         tasksCompleted: update.tasksForTheDay ? [update.tasksForTheDay] : [],
         adminApproved: update.adminApproved,
-        status: update.status
+        status: update.status,
+        hoursWorked: update.hoursWorked || 0
       }))
     });
   } catch (error) {

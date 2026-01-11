@@ -26,6 +26,11 @@ export async function POST(request: NextRequest) {
     const leadAssignees = Array.isArray(data.leadAssignees)
       ? data.leadAssignees.map((id: string) => new ObjectId(id))
       : [];
+    
+    // Convert vaIncharge array to ObjectIds
+    const vaIncharges = Array.isArray(data.vaIncharge)
+      ? data.vaIncharge.map((id: string) => new ObjectId(id))
+      : [];
 
     // Get current project to check if it has a status
     const currentProject = await db.collection('projects').findOne({
@@ -35,7 +40,7 @@ export async function POST(request: NextRequest) {
     // Prepare update data
     const updateData: any = {
       leadAssignee: leadAssignees, // Store as array
-      vaIncharge: data.vaIncharge ? new ObjectId(data.vaIncharge) : null,
+      vaIncharge: vaIncharges.length > 0 ? vaIncharges : null, // Store as array
       freelancer: data.freelancer || null,
       assignees: assignees, // New assignees field (array of ObjectIds)
       codersRecommendation: data.codersRecommendation || null,

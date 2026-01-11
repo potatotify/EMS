@@ -118,10 +118,74 @@ export default function EmployeeProjectsTable() {
       )
   );
 
+  // Table Row Skeleton
+  const EmployeeRowSkeleton = () => (
+    <tr className="hover:bg-neutral-50 transition-colors animate-pulse">
+      <td className="px-6 py-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-neutral-200 rounded-full"></div>
+          <div className="h-4 bg-neutral-200 rounded w-32"></div>
+        </div>
+      </td>
+      <td className="px-6 py-4">
+        <div className="flex flex-wrap gap-1">
+          <div className="h-6 bg-neutral-200 rounded w-24"></div>
+          <div className="h-6 bg-neutral-200 rounded w-24"></div>
+        </div>
+      </td>
+      <td className="px-6 py-4">
+        <div className="h-4 bg-neutral-200 rounded w-8"></div>
+      </td>
+      <td className="px-6 py-4">
+        <div className="h-4 bg-neutral-200 rounded w-24"></div>
+      </td>
+      <td className="px-6 py-4">
+        <div className="h-8 bg-neutral-200 rounded w-20"></div>
+      </td>
+    </tr>
+  );
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <div className="w-8 h-8 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin"></div>
+      <div className="space-y-6">
+        {/* Search Bar Skeleton */}
+        <div className="relative animate-pulse">
+          <div className="h-10 bg-neutral-200 rounded-lg"></div>
+        </div>
+
+        {/* Table Skeleton */}
+        <div className="bg-white rounded-xl border border-neutral-200 shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-neutral-50 border-b border-neutral-200">
+                <tr>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-neutral-700 uppercase tracking-wider">
+                    Employee
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-neutral-700 uppercase tracking-wider">
+                    Projects
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-neutral-700 uppercase tracking-wider">
+                    Project Count
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-neutral-700 uppercase tracking-wider">
+                    Joined
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-neutral-700 uppercase tracking-wider">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-neutral-200">
+                <EmployeeRowSkeleton />
+                <EmployeeRowSkeleton />
+                <EmployeeRowSkeleton />
+                <EmployeeRowSkeleton />
+                <EmployeeRowSkeleton />
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
     );
   }

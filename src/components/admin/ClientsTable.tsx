@@ -168,10 +168,71 @@ export default function ClientsTable() {
       )
   );
 
+  // Table Skeleton Loader
+  const TableRowSkeleton = () => (
+    <tr className="border-b border-neutral-200 hover:bg-neutral-50 animate-pulse">
+      <td className="px-4 py-4 border-r border-neutral-200">
+        <div className="h-4 bg-neutral-200 rounded w-32"></div>
+      </td>
+      <td className="px-4 py-4 border-r border-neutral-200">
+        <div className="h-4 bg-neutral-200 rounded w-40"></div>
+      </td>
+      <td className="px-4 py-4 border-r border-neutral-200">
+        <div className="h-4 bg-neutral-200 rounded w-24"></div>
+      </td>
+      <td className="px-4 py-4 border-r border-neutral-200">
+        <div className="h-4 bg-neutral-200 rounded w-20"></div>
+      </td>
+      <td className="px-4 py-4">
+        <div className="h-8 bg-neutral-200 rounded w-16"></div>
+      </td>
+    </tr>
+  );
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <div className="w-8 h-8 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin"></div>
+      <div className="space-y-6">
+        {/* Header Skeleton */}
+        <div className="flex gap-4 items-center animate-pulse">
+          <div className="relative flex-1">
+            <div className="h-10 bg-neutral-200 rounded-lg w-full"></div>
+          </div>
+          <div className="h-10 bg-neutral-200 rounded-lg w-32"></div>
+        </div>
+
+        {/* Table Skeleton */}
+        <div className="bg-white rounded-xl border border-neutral-200 shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse">
+              <thead className="bg-neutral-50 border-b-2 border-neutral-300">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-neutral-700 uppercase tracking-wider border-r border-neutral-200">
+                    Client
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-neutral-700 uppercase tracking-wider border-r border-neutral-200">
+                    Email
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-neutral-700 uppercase tracking-wider border-r border-neutral-200">
+                    Projects
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-neutral-700 uppercase tracking-wider border-r border-neutral-200">
+                    Total Investment
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-neutral-700 uppercase tracking-wider">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <TableRowSkeleton />
+                <TableRowSkeleton />
+                <TableRowSkeleton />
+                <TableRowSkeleton />
+                <TableRowSkeleton />
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
     );
   }

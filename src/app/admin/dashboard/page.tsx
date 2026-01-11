@@ -26,6 +26,7 @@ import {
   Building2,
   Briefcase,
   CalendarDays,
+  FileBarChart,
 } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -50,6 +51,7 @@ import ClientsTable from "@/components/admin/ClientsTable";
 import EmployeeProjectsTable from "@/components/admin/EmployeeProjectsTable";
 import ProjectDailyUpdatesTable from "@/components/admin/ProjectDailyUpdatesTable";
 import EmployeeDailyUpdatesTable from "@/components/admin/EmployeeDailyUpdatesTable";
+import EmployeeReport from "@/components/admin/EmployeeReport";
 
 interface PendingEmployee {
   _id: string;
@@ -78,6 +80,7 @@ type SectionType =
   | "employee-daily-updates"
   | "pending-approvals"
   | "employees"
+  | "employee-report"
   | "hackathons"
   | "messages"
   | "checklist-settings"
@@ -213,6 +216,11 @@ export default function AdminDashboard() {
       icon: <Calendar className="w-5 h-5" />
     },
     {
+      id: "employee-report",
+      title: "Employee Report",
+      icon: <FileBarChart className="w-5 h-5" />
+    },
+    {
       id: "project-tasks",
       title: "Project Tasks",
       icon: <CheckSquare className="w-5 h-5" />
@@ -343,6 +351,8 @@ export default function AdminDashboard() {
         );
       case "employees":
         return <EmployeesSection />;
+      case "employee-report":
+        return <EmployeeReport />;
       case "hackathons":
         return <HackathonsSection />;
       case "messages":
@@ -481,7 +491,7 @@ export default function AdminDashboard() {
         <main className="flex-1 overflow-y-auto bg-neutral-50/50">
           <div className={`${activeSection === "project-tasks" ? "w-full p-0" : "max-w-[1920px] mx-auto p-6 lg:p-8"}`}>
             {/* Section Header - Hidden for project-tasks */}
-            {activeSection !== "project-tasks" && activeSection !== "bonus-summary" && activeSection !== "daily-updates" && activeSection !== "project-daily-updates" && activeSection !== "task-analysis" && activeSection !== "hackathons" && activeSection !== "checklist-settings" && activeSection !== "employee-permissions" && activeSection !== "clients" && activeSection !== "employee-projects" && activeSection !== "employee-daily-updates" && (
+            {activeSection !== "project-tasks" && activeSection !== "bonus-summary" && activeSection !== "daily-updates" && activeSection !== "project-daily-updates" && activeSection !== "task-analysis" && activeSection !== "hackathons" && activeSection !== "checklist-settings" && activeSection !== "employee-permissions" && activeSection !== "clients" && activeSection !== "employee-projects" && activeSection !== "employee-daily-updates" && activeSection !== "employee-report" && (
               <motion.div
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}

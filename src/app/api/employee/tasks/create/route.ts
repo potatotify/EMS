@@ -47,7 +47,9 @@ export async function POST(request: NextRequest) {
       _id: new ObjectId(projectId),
       $or: [
         { leadAssignee: userIdObj },
-        { vaIncharge: userIdObj },
+        { leadAssignee: { $in: [userIdObj] } }, // Multiple lead assignees
+        { vaIncharge: userIdObj }, // Single VA incharge (legacy)
+        { vaIncharge: { $in: [userIdObj] } }, // Multiple VA incharges
         { updateIncharge: userIdObj },
         { assignees: userIdObj }, // Check if user is in assignees array
       ],
@@ -57,20 +59,35 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "You are not assigned to this project" }, { status: 403 });
     }
 
-    // Check if user is the lead assignee
+    // Check if user is the lead assignee (can be array or single)
     let isLeadAssignee = false;
     if (project.leadAssignee) {
-      let leadId: string;
-      if (project.leadAssignee instanceof ObjectId) {
-        leadId = project.leadAssignee.toString();
-      } else if (typeof project.leadAssignee === 'object' && project.leadAssignee._id) {
-        leadId = project.leadAssignee._id.toString();
-      } else if (typeof project.leadAssignee === 'object') {
-        leadId = project.leadAssignee.toString();
+      if (Array.isArray(project.leadAssignee)) {
+        const leadIds = project.leadAssignee.map((lead: any) => {
+          if (lead instanceof ObjectId) {
+            return lead.toString();
+          } else if (typeof lead === 'object' && lead._id) {
+            return lead._id.toString();
+          } else if (typeof lead === 'object') {
+            return lead.toString();
+          } else {
+            return lead.toString();
+          }
+        });
+        isLeadAssignee = leadIds.includes(userId);
       } else {
-        leadId = project.leadAssignee.toString();
+        let leadId: string;
+        if (project.leadAssignee instanceof ObjectId) {
+          leadId = project.leadAssignee.toString();
+        } else if (typeof project.leadAssignee === 'object' && project.leadAssignee._id) {
+          leadId = project.leadAssignee._id.toString();
+        } else if (typeof project.leadAssignee === 'object') {
+          leadId = project.leadAssignee.toString();
+        } else {
+          leadId = project.leadAssignee.toString();
+        }
+        isLeadAssignee = leadId === userId;
       }
-      isLeadAssignee = leadId === userId;
     }
 
     // Determine who to assign the task to
@@ -89,20 +106,40 @@ export async function POST(request: NextRequest) {
       
       let targetIsInProject = false;
       
-      // Check lead assignee
+      // Check lead assignee (can be array or single)
       if (project.leadAssignee) {
-        const leadId = typeof project.leadAssignee === 'object' 
-          ? (project.leadAssignee._id?.toString() || project.leadAssignee.toString())
-          : project.leadAssignee.toString();
-        if (leadId === targetIdStr) targetIsInProject = true;
+        if (Array.isArray(project.leadAssignee)) {
+          const leadIds = project.leadAssignee.map((lead: any) => {
+            if (typeof lead === 'object') {
+              return lead._id?.toString() || lead.toString();
+            }
+            return lead.toString();
+          });
+          if (leadIds.includes(targetIdStr)) targetIsInProject = true;
+        } else {
+          const leadId = typeof project.leadAssignee === 'object' 
+            ? (project.leadAssignee._id?.toString() || project.leadAssignee.toString())
+            : project.leadAssignee.toString();
+          if (leadId === targetIdStr) targetIsInProject = true;
+        }
       }
       
-      // Check VA incharge
+      // Check VA incharge (can be array or single)
       if (!targetIsInProject && project.vaIncharge) {
-        const vaId = typeof project.vaIncharge === 'object'
-          ? (project.vaIncharge._id?.toString() || project.vaIncharge.toString())
-          : project.vaIncharge.toString();
-        if (vaId === targetIdStr) targetIsInProject = true;
+        if (Array.isArray(project.vaIncharge)) {
+          const vaIds = project.vaIncharge.map((va: any) => {
+            if (typeof va === 'object') {
+              return va._id?.toString() || va.toString();
+            }
+            return va.toString();
+          });
+          if (vaIds.includes(targetIdStr)) targetIsInProject = true;
+        } else {
+          const vaId = typeof project.vaIncharge === 'object'
+            ? (project.vaIncharge._id?.toString() || project.vaIncharge.toString())
+            : project.vaIncharge.toString();
+          if (vaId === targetIdStr) targetIsInProject = true;
+        }
       }
       
       // Check update incharge

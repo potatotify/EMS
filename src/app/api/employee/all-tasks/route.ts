@@ -230,10 +230,11 @@ export async function GET(request: NextRequest) {
         projectName: p.projectName || "Unnamed Project",
         clientName: p.clientName || "Unknown Client",
         sections: p.sections || [],
+        leadAssignee: p.leadAssignee || null, // Include leadAssignee for permission checks
       });
     });
 
-    // Group tasks by project and section
+    // Group tasks by project and section, and add canTick flag
     const tasksByProject: Record<string, Record<string, any[]>> = {};
     populatedTasks.forEach((task: any) => {
       const projectId = task.projectId.toString();
@@ -248,6 +249,36 @@ export async function GET(request: NextRequest) {
         tasksByProject[projectName][section] = [];
       }
 
+      // Check if task is assigned to current user (for canTick flag)
+      let isAssignedToUser = false;
+      
+      if (task.assignedTo) {
+        let assignedToId: string | null = null;
+        if (typeof task.assignedTo === 'string') {
+          assignedToId = task.assignedTo;
+        } else if (task.assignedTo && typeof task.assignedTo === 'object') {
+          assignedToId = task.assignedTo._id || task.assignedTo.toString();
+        }
+        if (assignedToId && userId && assignedToId.toString() === userId.toString()) {
+          isAssignedToUser = true;
+        }
+      }
+
+      // Check multi-assignees
+      if (!isAssignedToUser && Array.isArray(task.assignees) && userId) {
+        const userIdStr = userId.toString();
+        isAssignedToUser = task.assignees.some((assignee: any) => {
+          if (!assignee) return false;
+          if (typeof assignee === 'string') return assignee === userIdStr;
+          if (assignee._id) return assignee._id.toString() === userIdStr;
+          if (assignee.toString) return assignee.toString() === userIdStr;
+          return false;
+        });
+      }
+
+      // Add flag to indicate if employee can tick this task
+      const canTick = isAssignedToUser || !task.assignedTo || (Array.isArray(task.assignees) && task.assignees.length === 0);
+
       // Attach subtasks to this task
       const taskIdStr = task._id.toString();
       const taskSubtasks = subtasksMap.get(taskIdStr) || [];
@@ -258,6 +289,7 @@ export async function GET(request: NextRequest) {
         projectId: projectId,
         projectName: projectName,
         subtasks: taskSubtasks,
+        canTick: canTick,
       });
     });
 
