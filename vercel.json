@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/admin/check-daily-tasks-fine",
+      "schedule": "0 10 * * *"
+    },
+    {
+      "path": "/api/admin/apply-custom-fines",
+      "schedule": "*/5 * * * *"
+    }
+  ]
+}

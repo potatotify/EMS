@@ -136,12 +136,15 @@ function EmployeeProjectTasksContent() {
   const [selectedTaskForSubtasks, setSelectedTaskForSubtasks] = useState<Task | null>(null);
   const [projectEmployees, setProjectEmployees] = useState<any[]>([]);
   const [isLeadAssignee, setIsLeadAssignee] = useState(false);
+  const [isNA, setIsNA] = useState(false);
+  const [naLoading, setNaLoading] = useState(false);
 
   // Fetch project details
   useEffect(() => {
     if (projectId) {
       fetchProject(projectId);
       fetchTasks(projectId);
+      checkNAStatus(projectId);
       // Check for new tasks every 30 seconds
       const interval = setInterval(() => {
         checkForNewTasks(projectId);
@@ -149,6 +152,45 @@ function EmployeeProjectTasksContent() {
       return () => clearInterval(interval);
     }
   }, [projectId]);
+
+  const checkNAStatus = async (projectId: string) => {
+    if (!isLeadAssignee) return;
+    try {
+      const response = await fetch(`/api/employee/mark-task-na?projectId=${projectId}`);
+      const data = await response.json();
+      if (response.ok) {
+        setIsNA(data.isNA || false);
+      }
+    } catch (error) {
+      console.error('Error checking NA status:', error);
+    }
+  };
+
+  const handleToggleNA = async () => {
+    if (!projectId || !isLeadAssignee) return;
+    setNaLoading(true);
+    try {
+      const response = await fetch('/api/employee/mark-task-na', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId,
+          isNA: !isNA
+        })
+      });
+      const data = await response.json();
+      if (response.ok) {
+        setIsNA(!isNA);
+      } else {
+        alert(data.error || 'Failed to update NA status');
+      }
+    } catch (error) {
+      console.error('Error toggling NA:', error);
+      alert('Failed to update NA status');
+    } finally {
+      setNaLoading(false);
+    }
+  };
 
   // Check for new tasks on mount
   useEffect(() => {
@@ -202,6 +244,9 @@ function EmployeeProjectTasksContent() {
             }
           }
           setIsLeadAssignee(isLead);
+          if (isLead) {
+            checkNAStatus(projectId);
+          }
         }
       }
     } catch (error) {
@@ -843,6 +888,21 @@ function EmployeeProjectTasksContent() {
                   <Bell className="w-5 h-5 text-orange-500 fill-orange-500 animate-pulse" />
                   <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full"></span>
                 </div>
+              )}
+              {/* NA Button for Lead Assignees */}
+              {isLeadAssignee && (
+                <button
+                  onClick={handleToggleNA}
+                  disabled={naLoading}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-colors ${
+                    isNA
+                      ? "bg-orange-50 border-orange-300 text-orange-700"
+                      : "bg-white border-neutral-200 text-neutral-700 hover:bg-neutral-50"
+                  } ${naLoading ? "opacity-50 cursor-not-allowed" : ""}`}
+                  title={isNA ? "Click to remove NA status" : "Mark as NA (Not Applicable) for today - No fine will be applied"}
+                >
+                  <span className="text-sm font-medium">{isNA ? "NA ✓" : "Mark NA"}</span>
+                </button>
               )}
               {/* Quick Filter: Assigned to Me */}
               <button

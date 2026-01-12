@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { FileSpreadsheet, RefreshCw, Plus, X, Eye } from "lucide-react";
+import { FileSpreadsheet, RefreshCw, Plus, X, Eye, Trash2 } from "lucide-react";
 import LoadingSpinner from "@/components/shared/LoadingSpinner";
 
 interface CustomEntry {
@@ -44,9 +44,18 @@ export default function BonusPointsSheet() {
   const [rows, setRows] = useState<BonusRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Helper function to get today's date in YYYY-MM-DD format
+  const getTodayDateString = () => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   const [employeeFilter, setEmployeeFilter] = useState<string>("all");
-  const [startDateFilter, setStartDateFilter] = useState<string>("");
-  const [endDateFilter, setEndDateFilter] = useState<string>("");
+  const [startDateFilter, setStartDateFilter] = useState<string>(getTodayDateString());
+  const [endDateFilter, setEndDateFilter] = useState<string>(getTodayDateString());
   const [editingCell, setEditingCell] = useState<string | null>(null);
   const [savingCell, setSavingCell] = useState<string | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
@@ -57,7 +66,16 @@ export default function BonusPointsSheet() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch("/api/admin/bonus-summary", {
+      const params = new URLSearchParams();
+      if (startDateFilter) {
+        params.append("startDate", startDateFilter);
+      }
+      if (endDateFilter) {
+        params.append("endDate", endDateFilter);
+      }
+      
+      const url = `/api/admin/bonus-summary${params.toString() ? `?${params.toString()}` : ''}`;
+      const response = await fetch(url, {
         cache: "no-store",
       });
       const data = await response.json();
@@ -76,7 +94,7 @@ export default function BonusPointsSheet() {
 
   useEffect(() => {
     fetchRows();
-  }, []);
+  }, [startDateFilter, endDateFilter]);
 
   const handleCustomFieldUpdate = async (
     employeeId: string,
@@ -95,7 +113,7 @@ export default function BonusPointsSheet() {
           employeeId,
           date,
           field,
-          entries
+          entries: entries.length > 0 ? entries : [] // Allow empty array to delete all
         })
       });
 
@@ -106,20 +124,23 @@ export default function BonusPointsSheet() {
             if (field === 'customBonus') {
               return {
                 ...row,
-                customBonusEntries: entries
+                customBonusEntries: entries.length > 0 ? entries : []
               };
             } else {
               return {
                 ...row,
-                customFineEntries: entries
+                customFineEntries: entries.length > 0 ? entries : []
               };
             }
           }
           return row;
         }));
         setEditingCell(null);
+        // Refresh data to ensure consistency
+        fetchRows();
       } else {
-        alert('Failed to save custom field');
+        const data = await response.json();
+        alert(data.error || 'Failed to save custom field');
       }
     } catch (error) {
       console.error('Error saving custom field:', error);
@@ -425,13 +446,15 @@ export default function BonusPointsSheet() {
                         {row.customBonusEntries && row.customBonusEntries.length > 0 ? (
                           <div className="space-y-1 w-full">
                             {row.customBonusEntries.slice(0, 2).map((entry, idx) => (
-                              <div key={idx} className="text-[11px] whitespace-nowrap">
-                                <span className="text-indigo-700 font-semibold">
-                                  {entry.type === 'points' ? `${entry.value} ` : `₹${entry.value} `}
-                                </span>
-                                <span className="text-neutral-600">
-                                  {entry.description || 'No description'}
-                                </span>
+                              <div key={idx} className="text-[11px] whitespace-nowrap flex items-center justify-between group/item">
+                                <div className="flex-1 min-w-0">
+                                  <span className="text-indigo-700 font-semibold">
+                                    {entry.type === 'points' ? `${entry.value} ` : `₹${entry.value} `}
+                                  </span>
+                                  <span className="text-neutral-600 truncate">
+                                    {entry.description || 'No description'}
+                                  </span>
+                                </div>
                               </div>
                             ))}
                             {row.customBonusEntries.length > 2 && (
@@ -453,13 +476,15 @@ export default function BonusPointsSheet() {
                         {row.customFineEntries && row.customFineEntries.length > 0 ? (
                           <div className="space-y-1 w-full">
                             {row.customFineEntries.slice(0, 2).map((entry, idx) => (
-                              <div key={idx} className="text-[11px] whitespace-nowrap">
-                                <span className="text-rose-700 font-semibold">
-                                  {entry.type === 'points' ? `${entry.value} ` : `₹${entry.value} `}
-                                </span>
-                                <span className="text-neutral-600">
-                                  {entry.description || 'No description'}
-                                </span>
+                              <div key={idx} className="text-[11px] whitespace-nowrap flex items-center justify-between group/item">
+                                <div className="flex-1 min-w-0">
+                                  <span className="text-rose-700 font-semibold">
+                                    {entry.type === 'points' ? `${entry.value} ` : `₹${entry.value} `}
+                                  </span>
+                                  <span className="text-neutral-600 truncate">
+                                    {entry.description || 'No description'}
+                                  </span>
+                                </div>
                               </div>
                             ))}
                             {row.customFineEntries.length > 2 && (
@@ -772,8 +797,12 @@ function CustomFieldEditor({
   };
 
   const removeEntry = (index: number) => {
-    if (localEntries.length > 1) {
-      setLocalEntries(localEntries.filter((_, i) => i !== index));
+    setLocalEntries(localEntries.filter((_, i) => i !== index));
+  };
+
+  const deleteAllEntries = () => {
+    if (confirm('Are you sure you want to delete all entries? This cannot be undone.')) {
+      setLocalEntries([]);
     }
   };
 
@@ -809,16 +838,14 @@ function CustomFieldEditor({
           <div key={index} className="bg-neutral-50 border-2 border-neutral-200 rounded-xl p-4 space-y-3 hover:border-emerald-300 transition-colors">
             <div className="flex items-center justify-between">
               <span className="text-sm font-semibold text-neutral-700 bg-white px-2 py-1 rounded-md">Entry #{index + 1}</span>
-              {localEntries.length > 1 && (
-                <button
-                  onClick={() => removeEntry(index)}
-                  disabled={saving}
-                  className="text-red-500 hover:text-red-700 disabled:opacity-50 p-1.5 rounded-lg hover:bg-red-50 transition-colors"
-                  title="Remove entry"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              )}
+              <button
+                onClick={() => removeEntry(index)}
+                disabled={saving}
+                className="text-red-500 hover:text-red-700 disabled:opacity-50 p-1.5 rounded-lg hover:bg-red-50 transition-colors"
+                title="Delete this entry"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
             <div className="flex gap-3">
               <div className="flex-1">
@@ -862,13 +889,25 @@ function CustomFieldEditor({
 
       {/* Footer */}
       <div className="px-6 py-4 border-t border-neutral-200 bg-neutral-50 space-y-3">
-        <button
-          onClick={addEntry}
-          disabled={saving}
-          className="w-full px-4 py-2.5 bg-white border-2 border-neutral-300 text-neutral-700 text-sm font-medium rounded-lg hover:bg-neutral-100 hover:border-emerald-400 disabled:opacity-50 flex items-center justify-center gap-2 transition-colors"
-        >
-          <Plus className="w-4 h-4" /> Add Another Entry
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={addEntry}
+            disabled={saving}
+            className="flex-1 px-4 py-2.5 bg-white border-2 border-neutral-300 text-neutral-700 text-sm font-medium rounded-lg hover:bg-neutral-100 hover:border-emerald-400 disabled:opacity-50 flex items-center justify-center gap-2 transition-colors"
+          >
+            <Plus className="w-4 h-4" /> Add Entry
+          </button>
+          {localEntries.length > 0 && (
+            <button
+              onClick={deleteAllEntries}
+              disabled={saving}
+              className="px-4 py-2.5 bg-red-50 border-2 border-red-200 text-red-700 text-sm font-medium rounded-lg hover:bg-red-100 hover:border-red-300 disabled:opacity-50 flex items-center justify-center gap-2 transition-colors"
+              title="Delete all entries"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
+        </div>
         <div className="flex gap-3">
           <button
             onClick={onCancel}

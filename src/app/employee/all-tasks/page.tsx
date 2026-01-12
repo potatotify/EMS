@@ -142,6 +142,9 @@ export default function AllTasksPage() {
   const [showSubtaskModal, setShowSubtaskModal] = useState(false);
   const [selectedTaskForSubtasks, setSelectedTaskForSubtasks] = useState<Task | null>(null);
   const [selectedProjectForSubtasks, setSelectedProjectForSubtasks] = useState<Project | null>(null);
+  const [projectEmployees, setProjectEmployees] = useState<any[]>([]);
+  const [naStatus, setNaStatus] = useState<Record<string, boolean>>({}); // projectId -> isNA
+  const [naLoading, setNaLoading] = useState<Record<string, boolean>>({}); // projectId -> loading
 
   useEffect(() => {
     if (status === "authenticated") {
@@ -150,6 +153,55 @@ export default function AllTasksPage() {
       fetchChecklistConfig();
     }
   }, [status]);
+
+  // Check NA status for all projects where user is lead assignee
+  useEffect(() => {
+    if (status === "authenticated" && projects.length > 0) {
+      projects.forEach(project => {
+        if (isLeadAssigneeForProject(project.projectName)) {
+          checkNAStatus(project._id);
+        }
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projects, status]);
+
+  const checkNAStatus = async (projectId: string) => {
+    try {
+      const response = await fetch(`/api/employee/mark-task-na?projectId=${projectId}`);
+      const data = await response.json();
+      if (response.ok) {
+        setNaStatus(prev => ({ ...prev, [projectId]: data.isNA || false }));
+      }
+    } catch (error) {
+      console.error('Error checking NA status:', error);
+    }
+  };
+
+  const handleToggleNA = async (projectId: string) => {
+    setNaLoading(prev => ({ ...prev, [projectId]: true }));
+    try {
+      const response = await fetch('/api/employee/mark-task-na', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId,
+          isNA: !naStatus[projectId]
+        })
+      });
+      const data = await response.json();
+      if (response.ok) {
+        setNaStatus(prev => ({ ...prev, [projectId]: !prev[projectId] }));
+      } else {
+        alert(data.error || 'Failed to update NA status');
+      }
+    } catch (error) {
+      console.error('Error toggling NA:', error);
+      alert('Failed to update NA status');
+    } finally {
+      setNaLoading(prev => ({ ...prev, [projectId]: false }));
+    }
+  };
 
   // Close display menu when clicking outside
   useEffect(() => {
@@ -1193,14 +1245,31 @@ export default function AllTasksPage() {
             {filteredProjects.map((projectName) => {
               const projectTasks = tasks[projectName] || {};
               const sections = Object.keys(projectTasks);
+              const project = projects.find(p => p.projectName === projectName);
 
               return (
                 <div key={projectName} className="flex-shrink-0 w-80 min-w-[320px] bg-neutral-50 rounded-xl p-4 border border-neutral-200">
                   {/* Project Header */}
                   <div className="mb-4">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Folder className="w-4 h-4 text-emerald-600" />
-                      <h3 className="font-semibold text-neutral-900">{projectName}</h3>
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-2">
+                        <Folder className="w-4 h-4 text-emerald-600" />
+                        <h3 className="font-semibold text-neutral-900">{projectName}</h3>
+                      </div>
+                      {isLeadAssigneeForProject(projectName) && project && (
+                        <button
+                          onClick={() => handleToggleNA(project._id)}
+                          disabled={naLoading[project._id]}
+                          className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium border transition-colors ${
+                            naStatus[project._id]
+                              ? "bg-orange-50 border-orange-300 text-orange-700"
+                              : "bg-white border-neutral-200 text-neutral-700 hover:bg-neutral-50"
+                          } ${naLoading[project._id] ? "opacity-50 cursor-not-allowed" : ""}`}
+                          title={naStatus[project._id] ? "Click to remove NA status" : "Mark as NA (Not Applicable) for today - No fine will be applied"}
+                        >
+                          {naStatus[project._id] ? "NA ✓" : "NA"}
+                        </button>
+                      )}
                     </div>
                     <div className="text-xs text-neutral-500">
                       {Object.values(projectTasks).reduce((sum, sectionTasks) => sum + sectionTasks.length, 0)} tasks
@@ -1413,12 +1482,29 @@ export default function AllTasksPage() {
           {filteredProjects.map((projectName) => {
             const projectTasks = tasks[projectName] || {};
             const sections = Object.keys(projectTasks);
+            const project = projects.find(p => p.projectName === projectName);
 
             return (
               <div key={projectName} className="mb-8">
-                <div className="flex items-center gap-2 mb-4">
-                  <Folder className="w-5 h-5 text-emerald-600" />
-                  <h2 className="text-xl font-bold text-neutral-900">{projectName}</h2>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <Folder className="w-5 h-5 text-emerald-600" />
+                    <h2 className="text-xl font-bold text-neutral-900">{projectName}</h2>
+                  </div>
+                  {isLeadAssigneeForProject(projectName) && project && (
+                    <button
+                      onClick={() => handleToggleNA(project._id)}
+                      disabled={naLoading[project._id]}
+                      className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium border transition-colors ${
+                        naStatus[project._id]
+                          ? "bg-orange-50 border-orange-300 text-orange-700"
+                          : "bg-white border-neutral-200 text-neutral-700 hover:bg-neutral-50"
+                      } ${naLoading[project._id] ? "opacity-50 cursor-not-allowed" : ""}`}
+                      title={naStatus[project._id] ? "Click to remove NA status" : "Mark as NA (Not Applicable) for today - No fine will be applied"}
+                    >
+                      {naStatus[project._id] ? "NA ✓" : "NA"}
+                    </button>
+                  )}
                 </div>
 
                 {sections.map((section) => {
@@ -1427,8 +1513,28 @@ export default function AllTasksPage() {
 
                   return (
                     <div key={section} className="mb-6">
-                      <div className="text-sm font-semibold text-neutral-600 mb-3 uppercase tracking-wider">
-                        {section}
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="text-sm font-semibold text-neutral-600 uppercase tracking-wider">
+                          {section}
+                        </div>
+                        {isLeadAssigneeForProject(projectName) && (() => {
+                          const project = projects.find(p => p.projectName === projectName);
+                          if (!project) return null;
+                          return (
+                            <button
+                              onClick={() => handleToggleNA(project._id)}
+                              disabled={naLoading[project._id]}
+                              className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium border transition-colors ${
+                                naStatus[project._id]
+                                  ? "bg-orange-50 border-orange-300 text-orange-700"
+                                  : "bg-white border-neutral-200 text-neutral-700 hover:bg-neutral-50"
+                              } ${naLoading[project._id] ? "opacity-50 cursor-not-allowed" : ""}`}
+                              title={naStatus[project._id] ? "Click to remove NA status" : "Mark as NA (Not Applicable) for today - No fine will be applied"}
+                            >
+                              {naStatus[project._id] ? "NA ✓" : "NA"}
+                            </button>
+                          );
+                        })()}
                       </div>
                       <div className="space-y-2">
                         {filtered.map((task) => {

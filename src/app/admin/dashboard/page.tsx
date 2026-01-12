@@ -27,6 +27,7 @@ import {
   Briefcase,
   CalendarDays,
   FileBarChart,
+  AlertCircle,
 } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -44,6 +45,7 @@ import EmployeesSection from "@/components/admin/EmployeesSection";
 import HackathonsSection from "@/components/admin/HackathonsSection";
 import ChecklistSettings from "@/components/admin/ChecklistSettings";
 import EmployeePermissions from "@/components/admin/EmployeePermissions";
+import FineControl from "@/components/admin/FineControl";
 import ProjectTaskList from "@/components/admin/ProjectTaskList";
 import TaskAnalysisSheet from "@/components/admin/TaskAnalysisSheet";
 import BonusPointsSheet from "@/components/admin/BonusPointsSheet";
@@ -89,7 +91,8 @@ type SectionType =
   | "task-analysis"
   | "bonus-summary"
   | "clients"
-  | "employee-projects";
+  | "employee-projects"
+  | "fine-control";
 
 interface SidebarItem {
   id: SectionType;
@@ -287,6 +290,11 @@ export default function AdminDashboard() {
       id: "employee-permissions",
       title: "Employee Permissions",
       icon: <Shield className="w-5 h-5" />
+    },
+    {
+      id: "fine-control",
+      title: "Fine Control",
+      icon: <Clock className="w-5 h-5" />
     }
   ];
 
@@ -361,6 +369,8 @@ export default function AdminDashboard() {
         return <ChecklistSettings />;
       case "employee-permissions":
         return <EmployeePermissions />;
+      case "fine-control":
+        return <FineControl />;
       case "project-tasks":
         return <ProjectTaskList />;
       case "task-analysis":

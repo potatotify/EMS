@@ -43,6 +43,7 @@ interface BonusFineCalculation {
   missingTeamMeetingsFine: number;
   missingInternalMeetingsFine: number;
   missingClientMeetingsFine: number;
+  missingDailyTasksFine: number;
   absenceFines: number;
   totalFine: number;
   
@@ -218,6 +219,7 @@ export async function POST(request: NextRequest) {
       missingTeamMeetingsFine: 0,
       missingInternalMeetingsFine: 0,
       missingClientMeetingsFine: 0,
+      missingDailyTasksFine: 0,
       absenceFines: 0,
       totalFine: 0,
       netAmount: 0,
@@ -313,12 +315,125 @@ export async function POST(request: NextRequest) {
       calculation.absenceFines = 0; // 0 days: no fine
     }
     
+    // 3.5. Missing Daily Tasks Fine (for lead assignees who didn't set tasks before admin-configured deadline)
+    // Get fines from dailyTaskFines collection for this period
+    const dailyTaskFines = await db.collection('dailyTaskFines').find({
+      employeeId: new ObjectId(userId),
+      date: { $gte: startDate }
+    }).toArray();
+    
+    calculation.missingDailyTasksFine = dailyTaskFines.reduce((sum: number, fine: any) => {
+      return sum + (fine.fineAmount || 0);
+    }, 0);
+
+    // Get fine control settings to show deadline info and check for pending fines
+    const fineControlSettings = await db.collection('fineControlSettings').findOne({
+      type: 'default'
+    });
+    const deadlineHour = fineControlSettings?.dailyTasksDeadlineHour ?? 10;
+    const deadlineMinute = fineControlSettings?.dailyTasksDeadlineMinute ?? 0;
+    const fineAmount = fineControlSettings?.missingDailyTasksFine || 500;
+    const deadlineTime = `${String(deadlineHour).padStart(2, '0')}:${String(deadlineMinute).padStart(2, '0')}`;
+    
+    // Check for pending fine for today (if deadline has passed but fine not yet applied)
+    const currentTime = new Date();
+    const today = new Date(currentTime.getFullYear(), currentTime.getMonth(), currentTime.getDate());
+    today.setHours(0, 0, 0, 0);
+    const deadline = new Date(today);
+    deadline.setHours(deadlineHour, deadlineMinute, 0, 0);
+    const todayEnd = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+    
+    // Only check pending fine if deadline has passed today
+    if (currentTime >= deadline) {
+      // Check if user is a lead assignee of any active project
+      // Handle both single ObjectId and array of ObjectIds for leadAssignee
+      const userIdObj = new ObjectId(userId);
+      const allProjects = await db.collection('projects').find({
+        status: 'in_progress'
+      }).toArray();
+      
+      // Filter projects where user is a lead assignee
+      const activeProjects = allProjects.filter((project: any) => {
+        if (!project.leadAssignee) return false;
+        if (Array.isArray(project.leadAssignee)) {
+          return project.leadAssignee.some((lead: any) => {
+            const leadId = lead instanceof ObjectId ? lead : (lead._id ? lead._id : new ObjectId(lead));
+            return leadId.equals(userIdObj);
+          });
+        } else {
+          const leadId = project.leadAssignee instanceof ObjectId 
+            ? project.leadAssignee 
+            : (project.leadAssignee._id ? project.leadAssignee._id : new ObjectId(project.leadAssignee));
+          return leadId.equals(userIdObj);
+        }
+      });
+      
+      if (activeProjects.length > 0) {
+        // Check if fine was already applied today
+        const todayFine = await db.collection('dailyTaskFines').findOne({
+          employeeId: userIdObj,
+          date: { 
+            $gte: today, 
+            $lt: todayEnd
+          }
+        });
+        
+        // Check if marked NA for any active project today
+        let isMarkedNA = false;
+        for (const project of activeProjects) {
+          const todayNA = await db.collection('dailyTaskNA').findOne({
+            employeeId: userIdObj,
+            projectId: project._id,
+            date: { 
+              $gte: today, 
+              $lt: todayEnd
+            }
+          });
+          if (todayNA) {
+            isMarkedNA = true;
+            break;
+          }
+        }
+        
+        // Check if any tasks were created today before deadline for any active project
+        let hasCreatedTasksToday = false;
+        for (const project of activeProjects) {
+          const tasksCreatedToday = await db.collection('tasks').find({
+            projectId: project._id,
+            createdBy: userIdObj,
+            createdAt: {
+              $gte: today,
+              $lt: deadline
+            }
+          }).toArray();
+          
+          if (tasksCreatedToday.length > 0) {
+            hasCreatedTasksToday = true;
+            break;
+          }
+        }
+        
+        // If deadline passed, no tasks created, not NA, and no fine applied yet - show pending fine
+        if (!todayFine && !isMarkedNA && !hasCreatedTasksToday) {
+          calculation.missingDailyTasksFine += fineAmount;
+          (calculation as any).missingDailyTasksFineDetails = `Deadline: ${deadlineTime} - Includes pending fine for today (will be applied automatically)`;
+        } else if (calculation.missingDailyTasksFine > 0) {
+          (calculation as any).missingDailyTasksFineDetails = `Deadline: ${deadlineTime} - Applied for days when no tasks were created before this time`;
+        }
+      } else if (calculation.missingDailyTasksFine > 0) {
+        (calculation as any).missingDailyTasksFineDetails = `Deadline: ${deadlineTime} - Applied for days when no tasks were created before this time`;
+      }
+    } else if (calculation.missingDailyTasksFine > 0) {
+      (calculation as any).missingDailyTasksFineDetails = `Deadline: ${deadlineTime} - Applied for days when no tasks were created before this time`;
+    }
+
     // Step 3: Sum all fines
     const sumOfAllFines = 
       calculation.missingDailyUpdatesFine +
       calculation.missingTeamMeetingsFine +
       calculation.missingInternalMeetingsFine +
       calculation.missingClientMeetingsFine +
+      calculation.missingDailyTasksFine +
       calculation.absenceFines;
     
     // Step 4: Check No Fine Conditions (8.1-8.2) - if met, no fines at all

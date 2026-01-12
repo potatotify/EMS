@@ -37,6 +37,7 @@ interface BonusFineCalculation {
   missingTeamMeetingsFine: number;
   missingInternalMeetingsFine: number;
   missingClientMeetingsFine: number;
+  missingDailyTasksFine: number;
   absenceFines: number;
   totalFine: number;
   netAmount: number;
@@ -46,6 +47,7 @@ interface BonusFineCalculation {
   manualFine?: number;
   adminNotes?: string;
   approvedByCoreTeam?: boolean;
+  missingDailyTasksFineDetails?: string;
 }
 
 export default function EmployeeBonusFine() {
@@ -276,6 +278,19 @@ export default function EmployeeBonusFine() {
                   <span className="font-semibold text-red-700">₹{calculation.missingClientMeetingsFine.toLocaleString()}</span>
                 </div>
               )}
+              {calculation.missingDailyTasksFine > 0 && (
+                <div className="p-2 bg-red-50 rounded-lg">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-700">Missing Daily Tasks:</span>
+                    <span className="font-semibold text-red-700">₹{calculation.missingDailyTasksFine.toLocaleString()}</span>
+                  </div>
+                  {(calculation as any).missingDailyTasksFineDetails && (
+                    <div className="text-xs text-gray-600 mt-1">
+                      {(calculation as any).missingDailyTasksFineDetails}
+                    </div>
+                  )}
+                </div>
+              )}
               {calculation.absenceFines !== 0 && (
                 <div className="flex justify-between items-center p-2 bg-red-50 rounded-lg">
                   <span className="text-sm text-gray-700">Absence Fines:</span>
@@ -284,6 +299,21 @@ export default function EmployeeBonusFine() {
                   }`}>
                     ₹{calculation.absenceFines.toLocaleString()}
                   </span>
+                </div>
+              )}
+              {(calculation as any).customFinesCurrency > 0 && (
+                <div className="p-2 bg-red-50 rounded-lg">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-700">Custom Fines:</span>
+                    <span className="font-semibold text-red-700">
+                      ₹{(calculation as any).customFinesCurrency.toLocaleString()}
+                    </span>
+                  </div>
+                  {(calculation as any).customFinesPoints > 0 && (
+                    <div className="text-xs text-gray-600 mt-1">
+                      Points: {(calculation as any).customFinesPoints}
+                    </div>
+                  )}
                 </div>
               )}
               {calculation.isProjectLead && (
