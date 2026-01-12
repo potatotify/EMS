@@ -118,6 +118,9 @@ export default function BonusPointsSheet() {
       });
 
       if (response.ok) {
+        const data = await response.json();
+        console.log(`[BonusPointsSheet] Save successful:`, data);
+        
         // Update local state
         setRows(prevRows => prevRows.map(row => {
           if (row.employeeId === employeeId && row.date === date) {
@@ -137,10 +140,15 @@ export default function BonusPointsSheet() {
         }));
         setEditingCell(null);
         // Refresh data to ensure consistency
-        fetchRows();
+        await fetchRows();
+        
+        if (data.entriesSaved === 0 && entries.length > 0) {
+          alert(`Warning: No valid entries were saved. Please ensure entries have non-zero values and descriptions.`);
+        }
       } else {
         const data = await response.json();
-        alert(data.error || 'Failed to save custom field');
+        console.error(`[BonusPointsSheet] Save failed:`, data);
+        alert(data.error || data.details || 'Failed to save custom field');
       }
     } catch (error) {
       console.error('Error saving custom field:', error);
@@ -523,8 +531,15 @@ export default function BonusPointsSheet() {
       {/* Modal Overlay for Custom Field Editor */}
       {editingCell && (() => {
         const isBonus = editingCell.includes('customBonus');
-        const currentRow = rows.find(r => `${r.employeeId}-${r.date}-${isBonus ? 'customBonus' : 'customFine'}` === editingCell);
-        const [employeeId, date] = editingCell.split('-');
+        const currentRow = rows.find(r => {
+          const rowKey = `${r.employeeId}-${r.date}-${isBonus ? 'customBonus' : 'customFine'}`;
+          return rowKey === editingCell;
+        });
+        
+        if (!currentRow) {
+          console.error(`[BonusPointsSheet] Could not find row for editingCell: ${editingCell}`);
+          return null;
+        }
         
         return (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setEditingCell(null)}>
@@ -532,7 +547,17 @@ export default function BonusPointsSheet() {
               <CustomFieldEditor
                 entries={isBonus ? (currentRow?.customBonusEntries || []) : (currentRow?.customFineEntries || [])}
                 onSave={(entries) => {
-                  handleCustomFieldUpdate(employeeId, date, isBonus ? 'customBonus' : 'customFine', entries);
+                  // Send all entries - let the API filter invalid ones
+                  // But log what we're sending for debugging
+                  console.log(`[BonusPointsSheet] Sending ${entries.length} entries for ${currentRow.employeeName} on ${currentRow.date}`);
+                  console.log(`[BonusPointsSheet] Entry details:`, entries.map((e, i) => ({
+                    index: i,
+                    value: e.value,
+                    type: e.type,
+                    description: e.description?.substring(0, 50),
+                    isValid: (e.value !== 0 && !isNaN(e.value) && e.value !== null && e.value !== undefined && e.description && e.description.trim().length > 0)
+                  })));
+                  handleCustomFieldUpdate(currentRow.employeeId, currentRow.date, isBonus ? 'customBonus' : 'customFine', entries);
                 }}
                 onCancel={() => setEditingCell(null)}
                 saving={savingCell === editingCell}
@@ -788,9 +813,17 @@ function CustomFieldEditor({
   saving: boolean;
   title: string;
 }) {
-  const [localEntries, setLocalEntries] = useState<CustomEntry[]>(
-    entries.length > 0 ? entries : [{ value: 0, type: 'points', description: '' }]
-  );
+  const [localEntries, setLocalEntries] = useState<CustomEntry[]>(() => {
+    // If we have existing entries, use them; otherwise start with one empty entry
+    if (entries.length > 0) {
+      return entries.map(e => ({
+        value: e.value || 0,
+        type: e.type || 'points',
+        description: e.description || ''
+      }));
+    }
+    return [{ value: 0, type: 'points', description: '' }];
+  });
 
   const addEntry = () => {
     setLocalEntries([...localEntries, { value: 0, type: 'points', description: '' }]);
@@ -809,11 +842,17 @@ function CustomFieldEditor({
   const updateEntry = (index: number, field: 'value' | 'type' | 'description', value: string | number | 'points' | 'currency') => {
     const updated = [...localEntries];
     if (field === 'value') {
-      updated[index].value = Number(value);
+      // Handle empty string or invalid values
+      if (value === '' || value === null || value === undefined) {
+        updated[index].value = 0;
+      } else {
+        const numValue = typeof value === 'number' ? value : parseFloat(String(value));
+        updated[index].value = isNaN(numValue) ? 0 : numValue;
+      }
     } else if (field === 'type') {
       updated[index].type = value as 'points' | 'currency';
     } else {
-      updated[index].description = String(value);
+      updated[index].description = String(value || '');
     }
     setLocalEntries(updated);
   };
@@ -852,11 +891,15 @@ function CustomFieldEditor({
                 <label className="text-xs font-medium text-neutral-600 mb-1.5 block">Amount</label>
                 <input
                   type="number"
-                  value={entry.value}
-                  onChange={(e) => updateEntry(index, 'value', e.target.value)}
-                  placeholder="0"
+                  value={entry.value || ''}
+                  onChange={(e) => {
+                    const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                    updateEntry(index, 'value', isNaN(val) ? 0 : val);
+                  }}
+                  placeholder="Enter amount"
                   className="w-full px-3 py-2.5 text-sm border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent bg-white"
                   disabled={saving}
+                  step="any"
                 />
               </div>
               <div className="w-36">
@@ -917,7 +960,32 @@ function CustomFieldEditor({
             Cancel
           </button>
           <button
-            onClick={() => onSave(localEntries)}
+            onClick={() => {
+              // Send all entries - API will filter invalid ones
+              // But warn user if they're trying to save invalid entries
+              const validEntries = localEntries.filter(entry => {
+                const hasValidValue = entry.value !== 0 && entry.value !== null && entry.value !== undefined && !isNaN(entry.value);
+                const hasDescription = entry.description && entry.description.trim().length > 0;
+                return hasValidValue && hasDescription;
+              });
+              
+              if (validEntries.length === 0 && localEntries.length > 0) {
+                const invalidReasons = localEntries.map((e, i) => {
+                  const reasons = [];
+                  if (e.value === 0 || isNaN(e.value)) reasons.push('value is 0 or invalid');
+                  if (!e.description || e.description.trim().length === 0) reasons.push('description is empty');
+                  return `Entry ${i + 1}: ${reasons.join(', ')}`;
+                }).filter(r => r.includes(':'));
+                
+                if (invalidReasons.length > 0) {
+                  alert(`Please fill in all fields:\n${invalidReasons.join('\n')}`);
+                  return;
+                }
+              }
+              
+              console.log(`[CustomFieldEditor] Saving ${localEntries.length} entries (${validEntries.length} valid)`);
+              onSave(localEntries); // Send all entries, let API filter
+            }}
             disabled={saving}
             className="flex-1 px-4 py-2.5 bg-emerald-600 text-white font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50 transition-colors shadow-md"
           >

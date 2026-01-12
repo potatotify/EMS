@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Save, AlertCircle, Clock, DollarSign, Plus, Trash2, X, Check, Users, Briefcase, Calendar, Coins } from "lucide-react";
+import { Save, AlertCircle, Clock, DollarSign, Plus, Trash2, X, Check, Users, Briefcase, Calendar, Coins, CheckCircle2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 interface LeadAssignee {
@@ -28,6 +28,13 @@ interface CustomFine {
   description?: string;
   isActive: boolean;
   createdAt: Date;
+  applicationStatus?: {
+    appliedToday: boolean;
+    appliedCountToday: number;
+    employeesAppliedToday: string[];
+    lastAppliedAt: Date | null;
+    totalAppliedCount: number;
+  };
 }
 
 interface Employee {
@@ -470,6 +477,10 @@ export default function FineControl() {
           <div>
             <h3 className="text-lg font-semibold text-gray-900">Custom Fines</h3>
             <p className="text-sm text-gray-600">Create and manage custom fine rules</p>
+            <div className="mt-2 flex items-center gap-2 text-xs text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-md inline-flex">
+              <Clock className="w-3 h-3" />
+              <span>Fines are automatically applied every 5 minutes via cron job (no need to stay on this page)</span>
+            </div>
           </div>
           <div className="flex items-center gap-3">
             <motion.button
@@ -772,7 +783,7 @@ export default function FineControl() {
               >
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-2">
+                    <div className="flex items-center gap-3 mb-2 flex-wrap">
                       <h4 className="font-semibold text-gray-900">{getCriteriaLabel(fine.criteria)}</h4>
                       <span className={`px-2 py-1 text-xs rounded-full ${
                         fine.isActive 
@@ -788,6 +799,22 @@ export default function FineControl() {
                       }`}>
                         {fine.fineType === 'daily' ? 'Daily' : 'One-Time'}
                       </span>
+                      {fine.applicationStatus?.appliedToday && (
+                        <span className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full bg-emerald-100 text-emerald-700 font-medium">
+                          <CheckCircle2 className="w-3 h-3" />
+                          Applied Today ({fine.applicationStatus.appliedCountToday})
+                        </span>
+                      )}
+                      {fine.applicationStatus?.lastAppliedAt && !fine.applicationStatus.appliedToday && (
+                        <span className="px-2 py-1 text-xs rounded-full bg-amber-100 text-amber-700">
+                          Last: {new Date(fine.applicationStatus.lastAppliedAt).toLocaleDateString()}
+                        </span>
+                      )}
+                      {fine.applicationStatus && fine.applicationStatus.totalAppliedCount > 0 && (
+                        <span className="px-2 py-1 text-xs rounded-full bg-indigo-100 text-indigo-700">
+                          Total Applied: {fine.applicationStatus.totalAppliedCount}
+                        </span>
+                      )}
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                       {fine.criteria === 'lead_assignee_no_task_created' && fine.timeHour !== undefined && fine.timeMinute !== undefined && (
@@ -815,8 +842,24 @@ export default function FineControl() {
                         <span className="ml-2 font-medium">{fine.employeeIds.length}</span>
                       </div>
                     </div>
+                    {fine.applicationStatus?.appliedToday && fine.applicationStatus.employeesAppliedToday.length > 0 && (
+                      <div className="mt-2 p-2 bg-emerald-50 border border-emerald-200 rounded-md">
+                        <p className="text-xs font-medium text-emerald-800 mb-1">
+                          ✓ Applied to {fine.applicationStatus.employeesAppliedToday.length} employee(s) today:
+                        </p>
+                        <p className="text-xs text-emerald-700">
+                          {fine.applicationStatus.employeesAppliedToday.slice(0, 3).join(', ')}
+                          {fine.applicationStatus.employeesAppliedToday.length > 3 && ` +${fine.applicationStatus.employeesAppliedToday.length - 3} more`}
+                        </p>
+                      </div>
+                    )}
                     <p className="text-xs text-gray-500 mt-2">
                       Created: {fine.createdAt.toLocaleString()}
+                      {fine.applicationStatus?.lastAppliedAt && (
+                        <span className="ml-2">
+                          • Last applied: {new Date(fine.applicationStatus.lastAppliedAt).toLocaleString()}
+                        </span>
+                      )}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">

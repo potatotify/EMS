@@ -86,10 +86,11 @@ export async function POST(
             continue;
           }
 
-          // Check if fine was already applied (for one-time fines)
+          // Check if fine was already applied (for one-time fines) and not manually deleted
           const existingFine = await db.collection('customFineRecords').findOne({
             customFineId: customFine._id,
-            employeeId: employeeId
+            employeeId: employeeId,
+            manuallyDeleted: { $ne: true } // Exclude manually deleted records
           });
 
           if (existingFine) {
@@ -149,7 +150,7 @@ export async function POST(
                   createdAt: new Date(),
                   updatedAt: new Date()
                 }
-              },
+              } as any,
               { upsert: true }
             );
           }

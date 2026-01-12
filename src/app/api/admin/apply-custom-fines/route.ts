@@ -179,7 +179,7 @@ export async function POST(request: NextRequest) {
         });
 
         console.log(`[Apply Custom Fines] Fine ${customFine._id}: Processing ${employeeIds.length} employees`);
-        console.log(`[Apply Custom Fines] Employee IDs (normalized):`, employeeIds.map(id => normalizeId(id)));
+        console.log(`[Apply Custom Fines] Employee IDs (normalized):`, employeeIds.map((id: ObjectId) => normalizeId(id)));
 
         // Get specific project IDs if specified
         let specifiedProjectIds: ObjectId[] = [];
@@ -451,7 +451,7 @@ export async function POST(request: NextRequest) {
                 continue;
               }
 
-              // Check if fine was already applied today (for daily fines)
+              // Check if fine was already applied today (for daily fines) and not manually deleted
               if (customFine.fineType === 'daily') {
                 const existingFine = await db.collection('customFineRecords').findOne({
                   customFineId: customFine._id,
@@ -460,7 +460,8 @@ export async function POST(request: NextRequest) {
                   date: {
                     $gte: today,
                     $lt: new Date(today.getTime() + 24 * 60 * 60 * 1000)
-                  }
+                  },
+                  manuallyDeleted: { $ne: true } // Exclude manually deleted records
                 });
 
                 if (existingFine) {
@@ -473,11 +474,12 @@ export async function POST(request: NextRequest) {
                   continue;
                 }
               } else {
-                // For one-time fines, check if it was ever applied
+                // For one-time fines, check if it was ever applied and not manually deleted
                 const existingFine = await db.collection('customFineRecords').findOne({
                   customFineId: customFine._id,
                   employeeId: employeeId,
-                  projectId: project._id
+                  projectId: project._id,
+                  manuallyDeleted: { $ne: true } // Exclude manually deleted records
                 });
 
                 if (existingFine) {
@@ -577,19 +579,38 @@ export async function POST(request: NextRequest) {
                 }
 
                 if (existingCustomBonusFine) {
-                  // Update existing record - append to customFineEntries
-                  await db.collection('customBonusFine').updateOne(
-                    { _id: existingCustomBonusFine._id },
-                    {
-                      $push: {
-                        customFineEntries: { $each: fineEntries }
-                      },
-                      $set: {
-                        updatedAt: new Date()
-                      }
-                    }
-                  );
-                  console.log(`[Apply Custom Fines] Updated existing customBonusFine record for ${employee.name} (${employeeId.toString()}) on ${dateKey} with ${fineEntries.length} fine entries`);
+                  // Check which entries already exist to avoid duplicates
+                  const existingFineEntries = existingCustomBonusFine.customFineEntries || [];
+                  
+                  // Helper function to check if an entry already exists
+                  const entryExists = (newEntry: any, existingEntries: any[]): boolean => {
+                    return existingEntries.some(existing => 
+                      existing.type === newEntry.type &&
+                      existing.value === newEntry.value &&
+                      existing.description === newEntry.description
+                    );
+                  };
+                  
+                  // Filter out entries that already exist
+                  const newEntriesToAdd = fineEntries.filter(entry => !entryExists(entry, existingFineEntries));
+                  
+                  if (newEntriesToAdd.length > 0) {
+                    // Only push entries that don't already exist
+                    await db.collection('customBonusFine').updateOne(
+                      { _id: existingCustomBonusFine._id },
+                      {
+                        $push: {
+                          customFineEntries: { $each: newEntriesToAdd }
+                        },
+                        $set: {
+                          updatedAt: new Date()
+                        }
+                      } as any
+                    );
+                    console.log(`[Apply Custom Fines] Updated existing customBonusFine record for ${employee.name} (${employeeId.toString()}) on ${dateKey} with ${newEntriesToAdd.length} new fine entries (${fineEntries.length - newEntriesToAdd.length} already existed)`);
+                  } else {
+                    console.log(`[Apply Custom Fines] All fine entries already exist for ${employee.name} (${employeeId.toString()}) on ${dateKey}, skipping`);
+                  }
                 } else {
                   // Create new record - ensure employeeId is stored as string
                   const employeeIdStr = employeeId.toString();
@@ -667,7 +688,7 @@ export async function POST(request: NextRequest) {
               }
             }
             } catch (error) {
-            console.error(`Error processing employee ${employeeId} for fine ${customFine._id}:`, error);
+            console.error(`Error processing employee ${normalizeId(employeeIdObj)} for fine ${customFine._id}:`, error);
           }
         }
       } else if (customFine.criteria === 'default_fine') {
@@ -701,13 +722,14 @@ export async function POST(request: NextRequest) {
               continue;
             }
 
-            // Check if fine was already applied (for one-time fines)
-            const existingFine = await db.collection('customFineRecords').findOne({
-              customFineId: customFine._id,
-              employeeId: employeeId
-            });
+          // Check if fine was already applied (for one-time fines) and not manually deleted
+          const existingFine = await db.collection('customFineRecords').findOne({
+            customFineId: customFine._id,
+            employeeId: employeeId,
+            manuallyDeleted: { $ne: true } // Exclude manually deleted records
+          });
 
-            if (existingFine) {
+          if (existingFine) {
               finesSkipped.push({
                 fineId: customFine._id.toString(),
                 employeeId: employeeIdStr,
@@ -768,18 +790,38 @@ export async function POST(request: NextRequest) {
             }
 
             if (existingCustomBonusFine) {
-              await db.collection('customBonusFine').updateOne(
-                { _id: existingCustomBonusFine._id },
-                {
-                  $push: {
-                    customFineEntries: { $each: fineEntries }
-                  },
-                  $set: {
-                    updatedAt: new Date()
-                  }
-                }
-              );
-              console.log(`[Apply Custom Fines] Updated existing customBonusFine record for ${employee.name} (${employeeIdStrForQuery}) on ${dateKey} with ${fineEntries.length} fine entries`);
+              // Check which entries already exist to avoid duplicates
+              const existingFineEntries = existingCustomBonusFine.customFineEntries || [];
+              
+              // Helper function to check if an entry already exists
+              const entryExists = (newEntry: any, existingEntries: any[]): boolean => {
+                return existingEntries.some(existing => 
+                  existing.type === newEntry.type &&
+                  existing.value === newEntry.value &&
+                  existing.description === newEntry.description
+                );
+              };
+              
+              // Filter out entries that already exist
+              const newEntriesToAdd = fineEntries.filter(entry => !entryExists(entry, existingFineEntries));
+              
+              if (newEntriesToAdd.length > 0) {
+                // Only push entries that don't already exist
+                await db.collection('customBonusFine').updateOne(
+                  { _id: existingCustomBonusFine._id },
+                  {
+                    $push: {
+                      customFineEntries: { $each: newEntriesToAdd }
+                    },
+                    $set: {
+                      updatedAt: new Date()
+                    }
+                  } as any
+                );
+                console.log(`[Apply Custom Fines] Updated existing customBonusFine record for ${employee.name} (${employeeIdStrForQuery}) on ${dateKey} with ${newEntriesToAdd.length} new fine entries (${fineEntries.length - newEntriesToAdd.length} already existed)`);
+              } else {
+                console.log(`[Apply Custom Fines] All fine entries already exist for ${employee.name} (${employeeIdStrForQuery}) on ${dateKey}, skipping`);
+              }
             } else {
               const insertResult = await db.collection('customBonusFine').insertOne({
                 employeeId: employeeIdStrForQuery,

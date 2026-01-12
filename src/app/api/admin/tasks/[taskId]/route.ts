@@ -148,9 +148,75 @@ export async function PATCH(
       return NextResponse.json({ error: "Task not found" }, { status: 404 });
     }
 
-    // Check if user has permission (admin or assigned employee)
-    if (session.user.role !== "admin" && task.assignedTo?.toString() !== session.user.id) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    // Get the project to check lead assignee
+    const client = await clientPromise;
+    const db = client.db("worknest");
+    const project = await db.collection("projects").findOne({
+      _id: task.projectId instanceof ObjectId ? task.projectId : new ObjectId(task.projectId)
+    });
+
+    // Check if user has permission
+    const userId = session.user.id;
+    const isAdmin = session.user.role === "admin";
+    const isAssignedEmployee = task.assignedTo?.toString() === userId;
+    const isTaskCreator = task.createdBy?.toString() === userId;
+    
+    // Check if current user is a lead assignee of the project
+    let isUserLeadAssignee = false;
+    if (project) {
+      const userIdObj = new ObjectId(userId);
+      const leadAssignee = project.leadAssignee;
+      
+      if (Array.isArray(leadAssignee)) {
+        isUserLeadAssignee = leadAssignee.some((lead: any) => {
+          const leadId = lead instanceof ObjectId ? lead : (lead._id ? lead._id : new ObjectId(lead));
+          return leadId.equals(userIdObj);
+        });
+      } else if (leadAssignee) {
+        const leadId = leadAssignee instanceof ObjectId ? leadAssignee : (leadAssignee._id ? leadAssignee._id : new ObjectId(leadAssignee));
+        isUserLeadAssignee = leadId.equals(userIdObj);
+      }
+    }
+
+    // Check if task creator is admin
+    let isCreatorAdmin = false;
+    if (task.createdBy) {
+      try {
+        const creatorUser = await db.collection("users").findOne({
+          _id: task.createdBy instanceof ObjectId ? task.createdBy : new ObjectId(task.createdBy)
+        });
+        isCreatorAdmin = creatorUser?.role === "admin";
+      } catch (e) {
+        console.error("Error checking creator role:", e);
+      }
+    }
+
+    // Permission logic:
+    // 1. Admin can always edit
+    // 2. Lead assignees can edit any task in their project EXCEPT tasks created by admin
+    // 3. Employees can edit tasks they created themselves
+    // 4. Otherwise, assigned employees can edit (for backward compatibility)
+    let hasPermission = false;
+    if (isAdmin) {
+      hasPermission = true;
+    } else if (isUserLeadAssignee) {
+      // Lead assignee - can edit any task except admin-created ones
+      hasPermission = !isCreatorAdmin;
+    } else if (isTaskCreator) {
+      // User created the task - allow editing
+      hasPermission = true;
+    } else {
+      // Regular assigned employee - allow editing (backward compatibility)
+      hasPermission = isAssignedEmployee;
+    }
+
+    if (!hasPermission) {
+      return NextResponse.json({ 
+        error: "Forbidden",
+        message: isCreatorAdmin && isUserLeadAssignee
+          ? "You cannot edit tasks created by admin. Only admin can edit admin-created tasks."
+          : "You don't have permission to edit this task."
+      }, { status: 403 });
     }
 
     // Update fields
@@ -199,8 +265,7 @@ export async function PATCH(
     }
 
     // Assignment (only single employee allowed)
-    const client = await clientPromise;
-    const db = client.db("worknest");
+    // Note: client and db are already defined above
 
     // Helper function to safely create ObjectId
     const safeObjectId = (value: any): ObjectId | null => {
@@ -361,6 +426,14 @@ export async function PATCH(
       task.markModified("customFields");
     }
     
+    // Mark other potentially modified fields
+    if (body.assignees !== undefined || body.assignedTo !== undefined) {
+      task.markModified("assignees");
+      task.markModified("assigneeNames");
+      task.markModified("assignedTo");
+      task.markModified("assignedToName");
+    }
+    
     // Validate before saving
     try {
       await task.validate();
@@ -371,11 +444,26 @@ export async function PATCH(
         : validationError.message || "Validation failed";
       return NextResponse.json({ 
         error: "Validation failed",
-        message: validationMessages
+        message: validationMessages,
+        details: validationError.errors ? Object.keys(validationError.errors) : undefined
       }, { status: 400 });
     }
     
-    await task.save();
+    // Save task with better error handling
+    try {
+      await task.save();
+    } catch (saveError: any) {
+      console.error("Error saving task:", saveError);
+      const errorMessage = saveError.message || "Failed to save task";
+      const errorDetails = saveError.errors 
+        ? Object.values(saveError.errors).map((e: any) => e.message).join(", ")
+        : errorMessage;
+      return NextResponse.json({ 
+        error: "Failed to save task",
+        message: errorDetails,
+        details: saveError.stack
+      }, { status: 500 });
+    }
     
     console.log("Task saved. CustomFields:", task.customFields);
     

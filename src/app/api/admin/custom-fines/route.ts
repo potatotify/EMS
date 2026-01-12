@@ -21,7 +21,75 @@ export async function GET(request: NextRequest) {
       .sort({ createdAt: -1 })
       .toArray();
 
-    return NextResponse.json({ customFines });
+    // For each custom fine, check if it has been applied today
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayEnd = new Date(today);
+    todayEnd.setHours(23, 59, 59, 999);
+
+    const finesWithStatus = await Promise.all(
+      customFines.map(async (fine) => {
+        // Check for applied fines (not manually deleted)
+        const appliedRecords = await db.collection('customFineRecords').find({
+          customFineId: fine._id,
+          date: { $gte: today, $lte: todayEnd },
+          manuallyDeleted: { $ne: true }
+        }).toArray();
+
+        // Get all applied records (not just today) to show last applied date
+        const allAppliedRecords = await db.collection('customFineRecords')
+          .find({
+            customFineId: fine._id,
+            manuallyDeleted: { $ne: true }
+          })
+          .sort({ appliedAt: -1 })
+          .limit(1)
+          .toArray();
+
+        const lastAppliedAt = allAppliedRecords.length > 0 
+          ? allAppliedRecords[0].appliedAt 
+          : null;
+
+        // Get unique employee IDs that were fined today
+        const employeeIdsAppliedToday = appliedRecords
+          .map((r: any) => r.employeeId?.toString())
+          .filter((id: string | undefined): id is string => !!id);
+        
+        const uniqueEmployeeIds = [...new Set(employeeIdsAppliedToday)];
+        
+        // Fetch employee names for better display
+        const employeesAppliedToday: Array<{ id: string; name: string }> = [];
+        if (uniqueEmployeeIds.length > 0) {
+          const employeeObjects = await db.collection('users').find({
+            _id: { $in: uniqueEmployeeIds.map(id => new ObjectId(id)) },
+            role: 'employee'
+          }).toArray();
+          
+          for (const emp of employeeObjects) {
+            employeesAppliedToday.push({
+              id: emp._id.toString(),
+              name: emp.name || emp.email || 'Unknown'
+            });
+          }
+        }
+
+        return {
+          ...fine,
+          applicationStatus: {
+            appliedToday: appliedRecords.length > 0,
+            appliedCountToday: appliedRecords.length,
+            employeesAppliedToday: employeesAppliedToday.map(e => e.name),
+            lastAppliedAt: lastAppliedAt,
+            totalAppliedCount: await db.collection('customFineRecords').countDocuments({
+              customFineId: fine._id,
+              manuallyDeleted: { $ne: true }
+            })
+          }
+        };
+      })
+    );
+
+    return NextResponse.json({ customFines: finesWithStatus });
   } catch (error) {
     console.error('Error fetching custom fines:', error);
     return NextResponse.json(

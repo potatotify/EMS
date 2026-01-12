@@ -31,51 +31,80 @@ export async function PATCH(
       return NextResponse.json({ error: "Task not found" }, { status: 404 });
     }
 
-    // Check if user has permission (assigned employee or creator)
+    // Check if user has permission
     const taskAny = task as any;
     const userId = session.user.id;
-    let hasPermission = false;
+    const userIdObj = new ObjectId(userId);
+    
+    // Get the project to check lead assignee
+    const client = await clientPromise;
+    const db = client.db("worknest");
+    const project = await db.collection("projects").findOne({
+      _id: taskAny.projectId instanceof ObjectId ? taskAny.projectId : new ObjectId(taskAny.projectId)
+    });
 
-    // Check if user is assigned to the task
-    if (taskAny.assignedTo) {
-      const assignedToId = taskAny.assignedTo instanceof ObjectId 
-        ? taskAny.assignedTo.toString() 
-        : taskAny.assignedTo.toString();
-      
-      if (assignedToId === userId) {
-        hasPermission = true;
+    // Check if current user is a lead assignee of the project
+    let isUserLeadAssignee = false;
+    if (project) {
+      const leadAssignee = project.leadAssignee;
+      if (Array.isArray(leadAssignee)) {
+        isUserLeadAssignee = leadAssignee.some((lead: any) => {
+          const leadId = lead instanceof ObjectId ? lead : (lead._id ? lead._id : new ObjectId(lead));
+          return leadId.equals(userIdObj);
+        });
+      } else if (leadAssignee) {
+        const leadId = leadAssignee instanceof ObjectId ? leadAssignee : (leadAssignee._id ? leadAssignee._id : new ObjectId(leadAssignee));
+        isUserLeadAssignee = leadId.equals(userIdObj);
       }
     }
 
-    // Check if user is in assignees array
-    if (!hasPermission && taskAny.assignees && Array.isArray(taskAny.assignees)) {
-      for (const assignee of taskAny.assignees) {
-        const assigneeId = assignee instanceof ObjectId ? assignee.toString() : 
-                          (typeof assignee === 'object' && assignee._id ? assignee._id.toString() : assignee.toString());
-        if (assigneeId === userId) {
-          hasPermission = true;
-          break;
-        }
-      }
-    }
-
-    // Check if user created the task
-    if (!hasPermission && taskAny.createdBy) {
+    // Check if task creator is admin
+    let isCreatorAdmin = false;
+    let isUserTaskCreator = false;
+    
+    if (taskAny.createdBy) {
       const createdById = taskAny.createdBy instanceof ObjectId 
         ? taskAny.createdBy.toString() 
         : taskAny.createdBy.toString();
-      if (createdById === userId) {
-        hasPermission = true;
+      isUserTaskCreator = createdById === userId;
+      
+      // Check if creator is admin
+      try {
+        const creatorUser = await db.collection("users").findOne({
+          _id: taskAny.createdBy instanceof ObjectId ? taskAny.createdBy : new ObjectId(taskAny.createdBy)
+        });
+        isCreatorAdmin = creatorUser?.role === "admin";
+      } catch (e) {
+        console.error("Error checking creator role:", e);
       }
     }
 
-    // If task is unassigned, allow employees to update
-    if (!hasPermission && !taskAny.assignedTo && (!taskAny.assignees || taskAny.assignees.length === 0)) {
+    // Permission logic:
+    // 1. Employees can edit tasks they created themselves
+    // 2. Lead assignees can edit any task in their project EXCEPT tasks created by admin
+    // 3. Employees cannot edit tasks assigned to them by lead assignees (unless they created them)
+    let hasPermission = false;
+    
+    if (isUserTaskCreator) {
+      // User created the task - always allow editing
       hasPermission = true;
+    } else if (isUserLeadAssignee) {
+      // User is lead assignee - can edit any task except admin-created ones
+      hasPermission = !isCreatorAdmin;
+    } else {
+      // Regular employee - can only edit tasks they created
+      hasPermission = false;
     }
 
     if (!hasPermission) {
-      return NextResponse.json({ error: "You can only update tasks assigned to you or tasks you created" }, { status: 403 });
+      return NextResponse.json({ 
+        error: isCreatorAdmin && isUserLeadAssignee
+          ? "You cannot edit tasks created by admin. Only admin can edit admin-created tasks."
+          : "You can only edit tasks you created yourself. Tasks assigned to you by lead assignees cannot be edited.",
+        message: isCreatorAdmin && isUserLeadAssignee
+          ? "This task was created by an admin. Only admin can edit admin-created tasks."
+          : "You can only edit tasks you created yourself."
+      }, { status: 403 });
     }
 
     // Employees can update task fields (title, description, priority, dates, etc.)
@@ -219,8 +248,7 @@ export async function PATCH(
     console.log(`[Task Update] Task ${taskId} - Status: ${savedTask.status}, TickedAt: ${savedTask.tickedAt}, CompletedAt: ${savedTask.completedAt}, TimeSpent: ${savedTaskAny.timeSpent}, NotApplicable: ${savedTaskAny.notApplicable}`);
 
     // Manually populate user references
-    const client = await clientPromise;
-    const db = client.db("worknest");
+    // Note: client and db are already defined above
     const usersCollection = db.collection("users");
 
     let populatedAssignedTo = null;

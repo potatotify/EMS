@@ -145,6 +145,8 @@ export default function AllTasksPage() {
   const [projectEmployees, setProjectEmployees] = useState<any[]>([]);
   const [naStatus, setNaStatus] = useState<Record<string, boolean>>({}); // projectId -> isNA
   const [naLoading, setNaLoading] = useState<Record<string, boolean>>({}); // projectId -> loading
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [editingTaskProject, setEditingTaskProject] = useState<Project | null>(null);
 
   useEffect(() => {
     if (status === "authenticated") {
@@ -594,6 +596,28 @@ export default function AllTasksPage() {
     } catch (error) {
       console.error("Error deleting task:", error);
       alert("Failed to delete task. Please try again.");
+    }
+  };
+
+  const handleUpdateTask = async (taskId: string, updates: any) => {
+    try {
+      const response = await fetch(`/api/employee/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
+
+      const data = await response.json();
+      if (response.ok) {
+        await fetchAllTasks();
+        setEditingTask(null);
+        setEditingTaskProject(null);
+      } else {
+        alert(data.error || data.message || "Failed to update task");
+      }
+    } catch (error) {
+      console.error("Error updating task:", error);
+      alert("Failed to update task. Please try again.");
     }
   };
 
@@ -1291,6 +1315,28 @@ export default function AllTasksPage() {
                             const isNotApplicable = Boolean((task as any).notApplicable);
                             const isOverdue = task.deadlineDate ? new Date(task.deadlineDate) < new Date() && task.status !== "completed" : false;
                             
+                            // Check if this task is being edited
+                            if (editingTask?._id === task._id) {
+                              return (
+                                <div key={task._id} className="relative z-10">
+                                  <InlineTaskEditForm
+                                    task={task}
+                                    project={editingTaskProject}
+                                    onSave={async () => {
+                                      setEditingTask(null);
+                                      setEditingTaskProject(null);
+                                      await fetchAllTasks();
+                                    }}
+                                    onCancel={() => {
+                                      setEditingTask(null);
+                                      setEditingTaskProject(null);
+                                    }}
+                                    onUpdate={handleUpdateTask}
+                                  />
+                                </div>
+                              );
+                            }
+                            
                             return (
                               <motion.div
                                 key={task._id}
@@ -1424,16 +1470,41 @@ export default function AllTasksPage() {
                                   </div>
                                 </div>
                                 <div className="flex items-center gap-1">
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      alert('Edit functionality coming soon');
-                                    }}
-                                    className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-neutral-100 rounded transition-all"
-                                    title="Edit task"
-                                  >
-                                    <Edit2 className="w-4 h-4 text-neutral-500" />
-                                  </button>
+                                  {(() => {
+                                    // Check if user can edit this task
+                                    const taskCreatedBy = (task as any).createdBy;
+                                    const currentUserId = session?.user?.id;
+                                    const isUserCreator = currentUserId && taskCreatedBy && (
+                                      (typeof taskCreatedBy === 'string' && taskCreatedBy === currentUserId) ||
+                                      (typeof taskCreatedBy === 'object' && taskCreatedBy._id && taskCreatedBy._id.toString() === currentUserId) ||
+                                      (taskCreatedBy?.toString() === currentUserId)
+                                    );
+                                    
+                                    // Check if user is lead assignee for this project
+                                    const project = projects.find(p => p.projectName === projectName);
+                                    const isUserLeadAssignee = project ? isLeadAssigneeForProject(projectName) : false;
+                                    
+                                    // User can edit if:
+                                    // 1. They created the task, OR
+                                    // 2. They are a lead assignee (backend will check if task is admin-created)
+                                    const canEdit = isUserCreator || isUserLeadAssignee;
+                                    
+                                    if (!canEdit) return null;
+                                    
+                                    return (
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setEditingTask(task);
+                                          setEditingTaskProject(project || null);
+                                        }}
+                                        className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-neutral-100 rounded transition-all"
+                                        title={isUserLeadAssignee ? "Edit task (lead assignee)" : "Edit task"}
+                                      >
+                                        <Edit2 className="w-4 h-4 text-neutral-500" />
+                                      </button>
+                                    );
+                                  })()}
                                   {(isLeadAssigneeForProject(projectName) || ((task as any).createdBy && session?.user?.id && (task as any).createdBy === session.user.id)) && (
                                     <button
                                       onClick={(e) => {
@@ -1540,6 +1611,28 @@ export default function AllTasksPage() {
                         {filtered.map((task) => {
                           const isNotApplicable = Boolean((task as any).notApplicable);
                           const isOverdue = task.deadlineDate ? new Date(task.deadlineDate) < new Date() && task.status !== "completed" : false;
+                          
+                          // Check if this task is being edited
+                          if (editingTask?._id === task._id) {
+                            return (
+                              <div key={task._id} className="relative z-10">
+                                <InlineTaskEditForm
+                                  task={task}
+                                  project={editingTaskProject}
+                                  onSave={async () => {
+                                    setEditingTask(null);
+                                    setEditingTaskProject(null);
+                                    await fetchAllTasks();
+                                  }}
+                                  onCancel={() => {
+                                    setEditingTask(null);
+                                    setEditingTaskProject(null);
+                                  }}
+                                  onUpdate={handleUpdateTask}
+                                />
+                              </div>
+                            );
+                          }
                           
                           return (
                             <motion.div
@@ -1674,16 +1767,49 @@ export default function AllTasksPage() {
                                 </div>
                               </div>
                               <div className="flex items-center gap-1">
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    alert('Edit functionality coming soon');
-                                  }}
-                                  className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-neutral-100 rounded transition-all"
-                                  title="Edit task"
-                                >
-                                  <Edit2 className="w-4 h-4 text-neutral-500" />
-                                </button>
+                                {(() => {
+                                  // Check if user can edit this task
+                                  const taskCreatedBy = (task as any).createdBy;
+                                  const currentUserId = session?.user?.id;
+                                  const isUserCreator = currentUserId && taskCreatedBy && (
+                                    (typeof taskCreatedBy === 'string' && taskCreatedBy === currentUserId) ||
+                                    (typeof taskCreatedBy === 'object' && taskCreatedBy._id && taskCreatedBy._id.toString() === currentUserId) ||
+                                    (taskCreatedBy?.toString() === currentUserId)
+                                  );
+                                  
+                                  // Find project for this task
+                                  const projectName = Object.keys(tasks).find(pName => 
+                                    Object.values(tasks[pName]).flat().some(t => t._id === task._id)
+                                  );
+                                  const isUserLeadAssignee = projectName ? isLeadAssigneeForProject(projectName) : false;
+                                  
+                                  // User can edit if:
+                                  // 1. They created the task, OR
+                                  // 2. They are a lead assignee (backend will check if task is admin-created)
+                                  const canEdit = isUserCreator || isUserLeadAssignee;
+                                  
+                                  if (!canEdit) return null;
+                                  
+                                  // Find project for this task
+                                  const taskProject = projects.find(p => {
+                                    const projectTasks = tasks[p.projectName] || {};
+                                    return Object.values(projectTasks).flat().some(t => t._id === task._id);
+                                  });
+                                  
+                                  return (
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setEditingTask(task);
+                                        setEditingTaskProject(taskProject || null);
+                                      }}
+                                      className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-neutral-100 rounded transition-all"
+                                      title={isUserLeadAssignee ? "Edit task (lead assignee)" : "Edit task"}
+                                    >
+                                      <Edit2 className="w-4 h-4 text-neutral-500" />
+                                    </button>
+                                  );
+                                })()}
                                 {(task as any).createdBy && session?.user?.id && (task as any).createdBy === session.user.id && (
                                   <button
                                     onClick={(e) => {
@@ -1758,7 +1884,374 @@ export default function AllTasksPage() {
           onSubtasksChange={handleSubtasksChange}
         />
       )}
+
     </div>
+  );
+}
+
+// Inline Task Edit Form Component (matches project-tasks page design)
+function InlineTaskEditForm({
+  task,
+  project,
+  onSave,
+  onCancel,
+  onUpdate,
+}: {
+  task: Task;
+  project: Project | null;
+  onSave: () => void;
+  onCancel: () => void;
+  onUpdate: (taskId: string, updates: any) => Promise<void>;
+}) {
+  const [formData, setFormData] = useState({
+    title: task.title || "",
+    description: task.description || "",
+    priority: task.priority || 2,
+    dueDate: task.dueDate || "",
+    dueTime: task.dueTime || "",
+    deadlineDate: task.deadlineDate || "",
+    deadlineTime: task.deadlineTime || "",
+    taskKind: task.taskKind || "one-time",
+  });
+  const [saving, setSaving] = useState(false);
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const menuRefs = {
+    priority: useRef<HTMLDivElement>(null),
+    date: useRef<HTMLDivElement>(null),
+    deadline: useRef<HTMLDivElement>(null),
+    type: useRef<HTMLDivElement>(null),
+  };
+  const buttonRefs = {
+    priority: useRef<HTMLButtonElement>(null),
+    date: useRef<HTMLButtonElement>(null),
+    deadline: useRef<HTMLButtonElement>(null),
+    type: useRef<HTMLButtonElement>(null),
+  };
+
+  const getPriorityColor = (priority: number) => {
+    if (priority <= 2) return "text-red-500";
+    if (priority <= 4) return "text-orange-500";
+    if (priority <= 6) return "text-yellow-500";
+    return "text-green-500";
+  };
+
+  const formatDateDisplay = () => {
+    if (!formData.dueDate && !formData.dueTime) return null;
+    if (formData.dueDate && formData.dueTime) {
+      const dateObj = new Date(`${formData.dueDate}T${formData.dueTime}`);
+      return dateObj.toLocaleDateString("en-GB", { day: "2-digit", month: "short" }) + " " + formData.dueTime;
+    }
+    if (formData.dueDate) {
+      const dateObj = new Date(formData.dueDate);
+      return dateObj.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+    }
+    return formData.dueTime;
+  };
+
+  const formatDeadlineDisplay = () => {
+    if (!formData.deadlineDate && !formData.deadlineTime) return null;
+    if (formData.deadlineDate && formData.deadlineTime) {
+      const dateObj = new Date(`${formData.deadlineDate}T${formData.deadlineTime}`);
+      return dateObj.toLocaleDateString("en-GB", { day: "2-digit", month: "short" }) + " " + formData.deadlineTime;
+    }
+    if (formData.deadlineDate) {
+      const dateObj = new Date(formData.deadlineDate);
+      return dateObj.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+    }
+    return formData.deadlineTime;
+  };
+
+  const getTaskKindLabel = (kind: TaskKind) => {
+    const labels: Record<TaskKind, string> = {
+      "one-time": "One-time",
+      "daily": "Daily",
+      "weekly": "Weekly",
+      "monthly": "Monthly",
+      "recurring": "Recurring",
+      "custom": "Custom",
+    };
+    return labels[kind] || kind;
+  };
+
+  // Close menus when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      
+      if (openMenu === "priority" && menuRefs.priority.current && buttonRefs.priority.current &&
+          !menuRefs.priority.current.contains(target) && !buttonRefs.priority.current.contains(target)) {
+        setOpenMenu(null);
+      }
+      if (openMenu === "date" && menuRefs.date.current && buttonRefs.date.current &&
+          !menuRefs.date.current.contains(target) && !buttonRefs.date.current.contains(target)) {
+        setOpenMenu(null);
+      }
+      if (openMenu === "deadline" && menuRefs.deadline.current && buttonRefs.deadline.current &&
+          !menuRefs.deadline.current.contains(target) && !buttonRefs.deadline.current.contains(target)) {
+        setOpenMenu(null);
+      }
+      if (openMenu === "type" && menuRefs.type.current && buttonRefs.type.current &&
+          !menuRefs.type.current.contains(target) && !buttonRefs.type.current.contains(target)) {
+        setOpenMenu(null);
+      }
+    };
+
+    if (openMenu) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [openMenu]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.title.trim()) {
+      alert("Please enter a task title");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await onUpdate(task._id, {
+        title: formData.title,
+        description: formData.description,
+        priority: formData.priority,
+        dueDate: formData.dueDate || undefined,
+        dueTime: formData.dueTime || undefined,
+        deadlineDate: formData.deadlineDate || undefined,
+        deadlineTime: formData.deadlineTime || undefined,
+        taskKind: formData.taskKind,
+      });
+      onSave();
+    } catch (error) {
+      console.error("Error updating task:", error);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="bg-white rounded-lg border border-neutral-200 shadow-sm p-3">
+      {/* Task Title */}
+      <input
+        type="text"
+        placeholder="Task name"
+        value={formData.title}
+        onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+        className="w-full bg-transparent border-none outline-none text-sm font-medium text-neutral-900 placeholder:text-neutral-400 mb-2"
+        autoFocus
+        required
+      />
+
+      {/* Description */}
+      <div className="text-xs text-neutral-500 mb-1">Description</div>
+      <textarea
+        placeholder="Description"
+        value={formData.description}
+        onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+        rows={2}
+        className="w-full bg-transparent border-none outline-none text-xs text-neutral-600 placeholder:text-neutral-400 resize-none mb-3"
+      />
+
+      {/* Icon Buttons Row */}
+      <div className="flex items-center gap-1 flex-wrap mb-3">
+        {/* Priority */}
+        <div className="relative">
+          <button
+            ref={buttonRefs.priority}
+            type="button"
+            onClick={() => setOpenMenu(openMenu === "priority" ? null : "priority")}
+            className={`flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-neutral-100 transition-colors text-xs ${
+              formData.priority ? "bg-green-100 text-neutral-900" : "text-neutral-500"
+            }`}
+          >
+            <Flag className={`w-3.5 h-3.5 ${formData.priority ? getPriorityColor(formData.priority) : ""}`} />
+            {formData.priority > 0 && <span className="font-medium">P{formData.priority}</span>}
+          </button>
+          {openMenu === "priority" && (
+            <div
+              ref={menuRefs.priority}
+              className="absolute top-full left-0 mt-1 bg-white border border-neutral-200 rounded-lg shadow-lg z-50 min-w-[140px]"
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              {[1, 2, 3, 4, 5].map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => {
+                    setFormData({ ...formData, priority: p });
+                    setOpenMenu(null);
+                  }}
+                  className={`w-full text-left px-3 py-2 text-xs hover:bg-neutral-50 flex items-center gap-2 ${
+                    formData.priority === p ? "bg-emerald-50 text-emerald-700" : "text-neutral-700"
+                  }`}
+                >
+                  <Flag className={`w-3 h-3 ${getPriorityColor(p)}`} />
+                  <span>Priority {p}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Due Date/Time */}
+        <div className="relative">
+          <button
+            ref={buttonRefs.date}
+            type="button"
+            onClick={() => setOpenMenu(openMenu === "date" ? null : "date")}
+            className={`flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-neutral-100 transition-colors text-xs ${
+              formData.dueDate || formData.dueTime ? "bg-blue-100 text-blue-700" : "text-neutral-500"
+            }`}
+          >
+            <Calendar className="w-3.5 h-3.5" />
+            {formatDateDisplay() ? (
+              <span className="font-medium">{formatDateDisplay()}</span>
+            ) : (
+              <span>Due date</span>
+            )}
+          </button>
+          {openMenu === "date" && (
+            <div
+              ref={menuRefs.date}
+              className="absolute top-full left-0 mt-1 bg-white border border-neutral-200 rounded-lg shadow-lg z-50 p-3 min-w-[200px]"
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <div className="space-y-2">
+                <div>
+                  <label className="text-xs text-neutral-600 mb-1 block">Due Date</label>
+                  <input
+                    type="date"
+                    value={formData.dueDate}
+                    onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
+                    className="w-full bg-white border border-neutral-300 rounded px-2 py-1.5 text-xs text-neutral-900 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-neutral-600 mb-1 block">Due Time</label>
+                  <input
+                    type="time"
+                    value={formData.dueTime}
+                    onChange={(e) => setFormData({ ...formData, dueTime: e.target.value })}
+                    className="w-full bg-white border border-neutral-300 rounded px-2 py-1.5 text-xs text-neutral-900 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Task Type */}
+        <div className="relative">
+          <button
+            ref={buttonRefs.type}
+            type="button"
+            onClick={() => setOpenMenu(openMenu === "type" ? null : "type")}
+            className={`flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-neutral-100 transition-colors text-xs ${
+              formData.taskKind ? "bg-purple-100 text-purple-700" : "text-neutral-500"
+            }`}
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span className="font-medium">{getTaskKindLabel(formData.taskKind)}</span>
+          </button>
+          {openMenu === "type" && (
+            <div
+              ref={menuRefs.type}
+              className="absolute top-full left-0 mt-1 bg-white border border-neutral-200 rounded-lg shadow-lg z-50 min-w-[140px]"
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              {(["one-time", "daily", "weekly", "monthly", "recurring", "custom"] as TaskKind[]).map((kind) => (
+                <button
+                  key={kind}
+                  type="button"
+                  onClick={() => {
+                    setFormData({ ...formData, taskKind: kind });
+                    setOpenMenu(null);
+                  }}
+                  className={`w-full text-left px-3 py-2 text-xs hover:bg-neutral-50 ${
+                    formData.taskKind === kind ? "bg-purple-50 text-purple-700" : "text-neutral-700"
+                  }`}
+                >
+                  {getTaskKindLabel(kind)}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Deadline */}
+        <div className="relative">
+          <button
+            ref={buttonRefs.deadline}
+            type="button"
+            onClick={() => setOpenMenu(openMenu === "deadline" ? null : "deadline")}
+            className={`flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-neutral-100 transition-colors text-xs ${
+              formData.deadlineDate || formData.deadlineTime ? "bg-red-100 text-red-700" : "text-neutral-500"
+            }`}
+          >
+            <Clock className="w-3.5 h-3.5" />
+            {formatDeadlineDisplay() ? (
+              <span className="font-medium">{formatDeadlineDisplay()}</span>
+            ) : (
+              <span>Deadline</span>
+            )}
+          </button>
+          {openMenu === "deadline" && (
+            <div
+              ref={menuRefs.deadline}
+              className="absolute top-full left-0 mt-1 bg-white border border-neutral-200 rounded-lg shadow-lg z-50 p-3 min-w-[200px]"
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <div className="space-y-2">
+                <div>
+                  <label className="text-xs text-neutral-600 mb-1 block">Deadline Date</label>
+                  <input
+                    type="date"
+                    value={formData.deadlineDate}
+                    onChange={(e) => setFormData({ ...formData, deadlineDate: e.target.value })}
+                    className="w-full bg-white border border-neutral-300 rounded px-2 py-1.5 text-xs text-neutral-900 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-neutral-600 mb-1 block">Deadline Time</label>
+                  <input
+                    type="time"
+                    value={formData.deadlineTime}
+                    onChange={(e) => setFormData({ ...formData, deadlineTime: e.target.value })}
+                    className="w-full bg-white border border-neutral-300 rounded px-2 py-1.5 text-xs text-neutral-900 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Assignee (read-only) */}
+        {task.assignedTo && (
+          <div className="flex items-center gap-1.5 px-2 py-1 bg-orange-100 rounded-md text-xs text-neutral-900">
+            <User className="w-3.5 h-3.5 text-orange-600" />
+            <span className="font-medium">{task.assignedTo.name || task.assignedToName || "Unassigned"}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Action Buttons */}
+      <div className="flex items-center justify-end gap-3 pt-2 border-t border-neutral-200">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="px-3 py-1.5 text-sm text-neutral-700 hover:text-neutral-900 transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          disabled={saving}
+          className="px-3 py-1.5 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {saving ? "Saving..." : "Save Changes"}
+        </button>
+      </div>
+    </form>
   );
 }
 

@@ -105,6 +105,7 @@ interface Project {
   _id: string;
   projectName: string;
   clientName: string;
+  leadAssignee?: any; // Can be string, ObjectId, or array
 }
 
 function EmployeeProjectTasksContent() {
@@ -1646,6 +1647,7 @@ function TaskItem({
   isOverdue,
   currentUserId,
   isLeadAssignee,
+  project,
 }: {
   task: Task;
   onToggleComplete: () => void;
@@ -1658,7 +1660,34 @@ function TaskItem({
   isOverdue: boolean;
   currentUserId?: string;
   isLeadAssignee?: boolean;
+  project?: Project | null;
 }) {
+  // Check if current user can edit this task
+  const canEditTask = (() => {
+    if (!currentUserId) return false;
+    
+    // Check if user created the task
+    const taskCreatedBy = (task as any).createdBy;
+    const isUserCreator = taskCreatedBy && (
+      (typeof taskCreatedBy === 'string' && taskCreatedBy === currentUserId) ||
+      (typeof taskCreatedBy === 'object' && taskCreatedBy._id && taskCreatedBy._id.toString() === currentUserId) ||
+      (taskCreatedBy?.toString() === currentUserId)
+    );
+    
+    // If user created the task, they can always edit
+    if (isUserCreator) return true;
+    
+    // Check if user is lead assignee
+    if (isLeadAssignee && project) {
+      // Lead assignee can edit any task except admin-created ones
+      // Note: We'll check admin status on the backend, but for UI we allow lead assignees to see edit button
+      // The backend will reject if task is admin-created
+      return true;
+    }
+    
+    // Regular employee - can only edit tasks they created
+    return false;
+  })();
   const isNotApplicable = Boolean((task as any).notApplicable);
   
   // Debug: log the task to see if notApplicable is present
@@ -1788,13 +1817,15 @@ function TaskItem({
         </div>
       </div>
       <div className="flex items-center gap-1">
-        <button
-          onClick={onEdit}
-          className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-neutral-100 rounded transition-all"
-          title="Edit task"
-        >
-          <Edit2 className="w-4 h-4 text-neutral-500" />
-        </button>
+        {canEditTask && (
+          <button
+            onClick={onEdit}
+            className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-neutral-100 rounded transition-all"
+            title="Edit task"
+          >
+            <Edit2 className="w-4 h-4 text-neutral-500" />
+          </button>
+        )}
         {onDelete && ((isLeadAssignee) || ((task as any).createdBy && currentUserId && (task as any).createdBy === currentUserId)) && (
           <button
             onClick={(e) => {
