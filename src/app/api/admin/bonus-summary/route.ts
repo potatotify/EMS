@@ -344,16 +344,23 @@ export async function GET(request: NextRequest) {
     // ----------------------------
     // 2) Task-based Rewards/Fines
     // ----------------------------
-    const tasks = await Task.find({
-      createdAt: { $gte: startDate, $lte: endDate },
-    }).lean();
+    // Query all tasks - we'll filter by penalty/reward event date later
+    // This ensures we don't miss tasks where the penalty event occurred in the period
+    // even if the task was created/completed outside the period
+    const tasks = await Task.find({}).lean();
 
     for (const task of tasks as any[]) {
       const bonus = typeof task.bonusPoints === "number" ? task.bonusPoints : 0;
       const bonusCurrency = typeof task.bonusCurrency === "number" ? task.bonusCurrency : 0;
-      const penalty =
+      let penalty =
         typeof task.penaltyPoints === "number" ? task.penaltyPoints : 0;
-      const penaltyCurrency = typeof task.penaltyCurrency === "number" ? task.penaltyCurrency : 0;
+      let penaltyCurrency = typeof task.penaltyCurrency === "number" ? task.penaltyCurrency : 0;
+      
+      // If penaltyCurrency is 0 but penaltyPoints exists, use penaltyPoints as fallback
+      // This handles cases where tasks have penaltyPoints but penaltyCurrency wasn't set
+      if (penaltyCurrency <= 0 && penalty > 0) {
+        penaltyCurrency = penalty; // Use points as currency (1 point = 1 currency unit)
+      }
 
       // Determine which employees this task should be attributed to
       const employeeIds = new Set<string>();
@@ -367,11 +374,11 @@ export async function GET(request: NextRequest) {
 
       if (employeeIds.size === 0) continue;
 
-      // Date for attribution - when the task was ticked/completed or created
-      const baseDate =
-        task.tickedAt || task.completedAt || task.assignedDate || task.createdAt;
-      if (!baseDate) continue;
-      const dateKey = toDateKey(baseDate);
+      // Determine if this task resulted in reward or fine FIRST
+      // Then determine the event date and whether it's in the period
+      let baseDate: Date | null = null;
+      let penaltyEventInPeriod = false;
+      let rewardEventInPeriod = false;
 
       // Determine if this task resulted in reward or fine (similar logic to analysis route)
       let shouldGetPenalty = false;
@@ -413,8 +420,30 @@ export async function GET(request: NextRequest) {
 
           if (deadlineDate && completedAt > deadlineDate) {
             shouldGetPenalty = true;
+            // Penalty event is when task was completed late
+            // Include penalty if completion date OR deadline date is in the period
+            baseDate = completedAt;
+            const completedDate = new Date(completedAt);
+            const deadlineDateObj = deadlineDate;
+            
+            // Include if completion happened in period OR deadline was in period
+            if ((completedDate >= startDate && completedDate <= endDate) ||
+                (deadlineDateObj >= startDate && deadlineDateObj <= endDate)) {
+              penaltyEventInPeriod = true;
+            }
           } else if (bonus > 0) {
             shouldGetReward = true;
+            // Reward event is when task was completed on time
+            baseDate = completedAt;
+            const completedDate = new Date(completedAt);
+            if (completedDate >= startDate && completedDate <= endDate) {
+              rewardEventInPeriod = true;
+            }
+          }
+          
+          // Set baseDate if not set yet (for date attribution)
+          if (!baseDate) {
+            baseDate = completedAt || task.assignedDate || task.createdAt;
           }
         } else {
           // Not completed but approved - if deadline passed, treat as penalty if configured
@@ -438,16 +467,55 @@ export async function GET(request: NextRequest) {
           }
           if (deadlineDate && nowLocal > deadlineDate) {
             shouldGetPenalty = true;
+            // Penalty event is when deadline passed
+            baseDate = deadlineDate;
+            if (deadlineDate >= startDate && deadlineDate <= endDate) {
+              penaltyEventInPeriod = true;
+            }
+          }
+          
+          // Set baseDate if not set yet
+          if (!baseDate) {
+            baseDate = task.assignedDate || task.createdAt;
           }
         }
       } else if (
         approvalStatus === "rejected" ||
         approvalStatus === "deadline_passed"
       ) {
-        if (penalty > 0) {
+        if (penalty > 0 || penaltyCurrency > 0) {
           shouldGetPenalty = true;
+          // Penalty event is when task was rejected or deadline passed
+          baseDate = task.approvedAt || task.updatedAt || task.createdAt;
+          if (baseDate) {
+            const approvedDate = new Date(baseDate);
+            if (approvedDate >= startDate && approvedDate <= endDate) {
+              penaltyEventInPeriod = true;
+            }
+          }
         }
+        
+        // Set baseDate if not set yet
+        if (!baseDate) {
+          baseDate = task.assignedDate || task.createdAt;
+        }
+      } else {
+        // Task not approved yet - set baseDate for potential future processing
+        baseDate = task.assignedDate || task.createdAt;
       }
+
+      if (!baseDate) continue;
+      
+      // Only process if penalty/reward event occurred in the period
+      if (shouldGetPenalty && !penaltyEventInPeriod) {
+        continue; // Skip if penalty event was outside the period
+      }
+      
+      if (shouldGetReward && !rewardEventInPeriod) {
+        continue; // Skip if reward event was outside the period
+      }
+      
+      const dateKey = toDateKey(baseDate);
 
       for (const empId of employeeIds) {
         const row = getOrCreateRow(empId, dateKey);
@@ -455,16 +523,24 @@ export async function GET(request: NextRequest) {
         row.taskRewardTotal += bonus;
         row.taskRewardTotalCurrency += bonusCurrency;
 
-        if (shouldGetPenalty && penalty > 0) {
-          row.taskFine += penalty;
-        } else if (shouldGetReward && bonus > 0) {
-          row.taskEarned += bonus;
-        }
-        
-        if (shouldGetPenalty && penaltyCurrency > 0) {
-          row.taskFineCurrency += penaltyCurrency;
-        } else if (shouldGetReward && bonusCurrency > 0) {
-          row.taskEarnedCurrency += bonusCurrency;
+        if (shouldGetPenalty && penaltyEventInPeriod) {
+          // Apply penalty points if available
+          if (penalty > 0) {
+            row.taskFine += penalty;
+          }
+          // Apply penalty currency (use penaltyCurrency which may have been set from penaltyPoints)
+          if (penaltyCurrency > 0) {
+            row.taskFineCurrency += penaltyCurrency;
+          }
+        } else if (shouldGetReward && rewardEventInPeriod) {
+          // Apply reward points if available
+          if (bonus > 0) {
+            row.taskEarned += bonus;
+          }
+          // Apply reward currency
+          if (bonusCurrency > 0) {
+            row.taskEarnedCurrency += bonusCurrency;
+          }
         }
       }
     }

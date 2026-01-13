@@ -133,12 +133,14 @@ async function calculateEmployeeBonusFine(employeeId: string, period: string, db
     completedProjectsBonus: 0,
     hackathonBonus: 0,
     fresherBonus: 0,
+    taskBonus: 0,
     totalBonus: 0,
     missingDailyUpdatesFine: 0,
     missingTeamMeetingsFine: 0,
     missingInternalMeetingsFine: 0,
     missingClientMeetingsFine: 0,
     missingDailyTasksFine: 0,
+    taskFines: 0,
     absenceFines: 0,
     totalFine: 0,
     netAmount: 0,
@@ -166,6 +168,7 @@ async function calculateEmployeeBonusFine(employeeId: string, period: string, db
   }
 
   // Calculate total of actual bonuses (excluding base)
+  // Note: taskBonus will be added after task fines calculation
   calculation.totalBonus = 
     calculation.productsBonus +
     calculation.attendanceBonus140 +
@@ -341,6 +344,280 @@ async function calculateEmployeeBonusFine(employeeId: string, period: string, db
   (calculation as any).customFinesPoints = customFinesPoints;
   (calculation as any).customFinesCurrency = customFinesCurrency;
 
+  // 3.7. Task Fines (from tasks that were rejected, deadline_passed, or completed late)
+  // Query tasks assigned to this employee - we'll filter by penalty event date later
+  // We query all tasks assigned to the employee and then filter by when the penalty event occurred
+  const userIdObj = new ObjectId(userId);
+  const allTasks = await db.collection('tasks').find({
+    $or: [
+      { assignees: userIdObj },
+      { assignedTo: userIdObj }
+    ]
+  }).toArray();
+  
+  // Filter tasks that could have penalties in this period
+  // Include tasks where deadline falls within period, or task was completed/rejected in period
+  const tasks = allTasks.filter((task: any) => {
+    // Check if task has any date-related field in the period
+    const taskCreatedAt = task.createdAt ? new Date(task.createdAt) : null;
+    const taskAssignedDate = task.assignedDate ? new Date(task.assignedDate) : null;
+    const taskTickedAt = task.tickedAt ? new Date(task.tickedAt) : null;
+    const taskCompletedAt = task.completedAt ? new Date(task.completedAt) : null;
+    const taskApprovedAt = task.approvedAt ? new Date(task.approvedAt) : null;
+    
+    // Check deadline date
+    let deadlineDate: Date | null = null;
+    if (task.deadlineDate) {
+      deadlineDate = new Date(task.deadlineDate);
+      if (task.deadlineTime) {
+        const [h, m] = task.deadlineTime.split(':');
+        deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+      }
+    } else if (task.dueDate) {
+      deadlineDate = new Date(task.dueDate);
+      if (task.dueTime) {
+        const [h, m] = task.dueTime.split(':');
+        deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+      }
+    }
+    
+    // Include if any relevant date is in period
+    if (taskCreatedAt && taskCreatedAt >= startDate) return true;
+    if (taskAssignedDate && taskAssignedDate >= startDate) return true;
+    if (taskTickedAt && taskTickedAt >= startDate) return true;
+    if (taskCompletedAt && taskCompletedAt >= startDate) return true;
+    if (taskApprovedAt && taskApprovedAt >= startDate) return true;
+    if (deadlineDate && deadlineDate >= startDate && deadlineDate <= nowLocal) return true;
+    
+    return false;
+  });
+
+  let taskFinesTotal = 0;
+  const nowLocal = new Date();
+
+  for (const task of tasks) {
+    // Skip tasks marked as not applicable
+    if (task.notApplicable === true) {
+      continue;
+    }
+
+    // Check both penaltyCurrency and penaltyPoints
+    let penaltyCurrency = typeof task.penaltyCurrency === 'number' ? task.penaltyCurrency : 0;
+    const penaltyPoints = typeof task.penaltyPoints === 'number' ? task.penaltyPoints : 0;
+    
+    // Skip if no penalty configured at all
+    if (penaltyCurrency <= 0 && penaltyPoints <= 0) {
+      continue;
+    }
+    
+    // Use penaltyCurrency for fine calculation (currency is what gets deducted)
+    // If penaltyCurrency is 0 but penaltyPoints exists, use penaltyPoints as fallback
+    // This handles cases where tasks have penaltyPoints but penaltyCurrency wasn't set
+    if (penaltyCurrency <= 0 && penaltyPoints > 0) {
+      // Use penaltyPoints as currency (1 point = 1 currency unit)
+      // This ensures tasks with penaltyPoints but no penaltyCurrency still show fines
+      penaltyCurrency = penaltyPoints;
+    }
+    
+    // Skip if still no penalty amount
+    if (penaltyCurrency <= 0) {
+      continue;
+    }
+
+    const approvalStatus: string = task.approvalStatus || 'pending';
+    let shouldGetPenalty = false;
+
+    if (approvalStatus === 'approved') {
+      if (task.status === 'completed') {
+        // Check if task was completed after deadline
+        let deadlineDate: Date | null = null;
+
+        if (task.deadlineDate) {
+          deadlineDate = new Date(task.deadlineDate);
+          if (task.deadlineTime) {
+            const [h, m] = task.deadlineTime.split(':');
+            deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+          } else {
+            deadlineDate.setHours(23, 59, 59, 999);
+          }
+        } else if (task.dueDate) {
+          deadlineDate = new Date(task.dueDate);
+          if (task.dueTime) {
+            const [h, m] = task.dueTime.split(':');
+            deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+          } else {
+            deadlineDate.setHours(23, 59, 59, 999);
+          }
+        }
+
+        const completedAt = task.tickedAt || task.completedAt || task.updatedAt || nowLocal;
+
+        if (deadlineDate && completedAt > deadlineDate) {
+          shouldGetPenalty = true;
+        }
+      } else {
+        // Not completed but approved - if deadline passed, treat as penalty
+        let deadlineDate: Date | null = null;
+        if (task.deadlineDate) {
+          deadlineDate = new Date(task.deadlineDate);
+          if (task.deadlineTime) {
+            const [h, m] = task.deadlineTime.split(':');
+            deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+          } else {
+            deadlineDate.setHours(23, 59, 59, 999);
+          }
+        } else if (task.dueDate) {
+          deadlineDate = new Date(task.dueDate);
+          if (task.dueTime) {
+            const [h, m] = task.dueTime.split(':');
+            deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+          } else {
+            deadlineDate.setHours(23, 59, 59, 999);
+          }
+        }
+        if (deadlineDate && nowLocal > deadlineDate) {
+          shouldGetPenalty = true;
+        }
+      }
+    } else if (approvalStatus === 'rejected' || approvalStatus === 'deadline_passed') {
+      // Task was rejected or deadline passed - apply penalty
+      shouldGetPenalty = true;
+    }
+
+    if (shouldGetPenalty) {
+      // Check if the penalty event happened within the period
+      let penaltyEventDate: Date | null = null;
+      let includePenalty = false;
+      
+      if (approvalStatus === 'rejected' || approvalStatus === 'deadline_passed') {
+        // Penalty event is when task was rejected or deadline passed
+        penaltyEventDate = task.approvedAt || task.updatedAt || task.createdAt;
+        if (penaltyEventDate && penaltyEventDate >= startDate && penaltyEventDate <= nowLocal) {
+          includePenalty = true;
+        }
+      } else if (task.status === 'completed') {
+        // Penalty event is when task was completed late - check if completion happened in period
+        penaltyEventDate = task.tickedAt || task.completedAt || task.updatedAt;
+        if (penaltyEventDate && penaltyEventDate >= startDate && penaltyEventDate <= nowLocal) {
+          // Also verify the deadline was in the period or before
+          let deadlineDate: Date | null = null;
+          if (task.deadlineDate) {
+            deadlineDate = new Date(task.deadlineDate);
+            if (task.deadlineTime) {
+              const [h, m] = task.deadlineTime.split(':');
+              deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+            } else {
+              deadlineDate.setHours(23, 59, 59, 999);
+            }
+          } else if (task.dueDate) {
+            deadlineDate = new Date(task.dueDate);
+            if (task.dueTime) {
+              const [h, m] = task.dueTime.split(':');
+              deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+            } else {
+              deadlineDate.setHours(23, 59, 59, 999);
+            }
+          }
+          // Include if completed late and completion was in period
+          if (deadlineDate && penaltyEventDate > deadlineDate) {
+            includePenalty = true;
+          }
+        }
+      } else {
+        // For incomplete tasks with passed deadline, check if deadline passed within the period
+        let deadlineDate: Date | null = null;
+        if (task.deadlineDate) {
+          deadlineDate = new Date(task.deadlineDate);
+          if (task.deadlineTime) {
+            const [h, m] = task.deadlineTime.split(':');
+            deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+          } else {
+            deadlineDate.setHours(23, 59, 59, 999);
+          }
+        } else if (task.dueDate) {
+          deadlineDate = new Date(task.dueDate);
+          if (task.dueTime) {
+            const [h, m] = task.dueTime.split(':');
+            deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+          } else {
+            deadlineDate.setHours(23, 59, 59, 999);
+          }
+        }
+        // Include penalty if deadline passed during the period (deadline is within period and has passed)
+        if (deadlineDate && deadlineDate >= startDate && deadlineDate <= nowLocal) {
+          includePenalty = true;
+        }
+      }
+      
+      if (includePenalty) {
+        taskFinesTotal += penaltyCurrency;
+      }
+    }
+  }
+
+  calculation.taskFines = taskFinesTotal;
+
+  // Calculate task bonuses (from tasks that were completed on time and approved)
+  let taskBonusTotal = 0;
+
+  for (const task of tasks) {
+    // Skip tasks marked as not applicable
+    if (task.notApplicable === true) {
+      continue;
+    }
+
+    const bonusCurrency = typeof task.bonusCurrency === 'number' ? task.bonusCurrency : 0;
+    if (bonusCurrency <= 0) {
+      continue; // No bonus configured for this task
+    }
+
+    const approvalStatus: string = task.approvalStatus || 'pending';
+    let shouldGetReward = false;
+
+    if (approvalStatus === 'approved' && task.status === 'completed') {
+      // Check if task was completed on time (before deadline)
+      let deadlineDate: Date | null = null;
+
+      if (task.deadlineDate) {
+        deadlineDate = new Date(task.deadlineDate);
+        if (task.deadlineTime) {
+          const [h, m] = task.deadlineTime.split(':');
+          deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+        } else {
+          deadlineDate.setHours(23, 59, 59, 999);
+        }
+      } else if (task.dueDate) {
+        deadlineDate = new Date(task.dueDate);
+        if (task.dueTime) {
+          const [h, m] = task.dueTime.split(':');
+          deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+        } else {
+          deadlineDate.setHours(23, 59, 59, 999);
+        }
+      }
+
+      const completedAt = task.tickedAt || task.completedAt || task.updatedAt || nowLocal;
+
+      // Reward if completed on time (before deadline) or if no deadline
+      if (!deadlineDate || completedAt <= deadlineDate) {
+        shouldGetReward = true;
+      }
+    }
+
+    if (shouldGetReward) {
+      // Check if the reward event happened within the period
+      const rewardEventDate = task.tickedAt || task.completedAt || task.updatedAt;
+      if (rewardEventDate && rewardEventDate >= startDate) {
+        taskBonusTotal += bonusCurrency;
+      }
+    }
+  }
+
+  calculation.taskBonus = taskBonusTotal;
+  
+  // Add task bonus to total bonus
+  calculation.totalBonus += calculation.taskBonus;
+
   // Step 3: Sum all fines
   const sumOfAllFines = 
     calculation.missingDailyUpdatesFine +
@@ -348,6 +625,7 @@ async function calculateEmployeeBonusFine(employeeId: string, period: string, db
     calculation.missingInternalMeetingsFine +
     calculation.missingClientMeetingsFine +
     calculation.missingDailyTasksFine +
+    calculation.taskFines +
     calculation.absenceFines +
     customFinesCurrency; // Add custom fines currency to total fine
   
