@@ -451,22 +451,55 @@ function EmployeeProjectTasksContent() {
         requestBody.timeSpent = timeSpent;
       }
       
+      console.log(`[Toggle Complete] Updating task ${task._id} with status: ${newStatus}`, requestBody);
+      
       const response = await fetch(`/api/employee/tasks/${task._id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestBody),
       });
 
+      console.log(`[Toggle Complete] Response status: ${response.status}, ok: ${response.ok}`);
+
       if (response.ok) {
         await fetchTasks(projectId!);
       } else {
-        const errorData = await response.json();
-        console.error("Error updating task:", errorData);
-        alert(errorData.error || "Failed to update task");
+        let errorMessage = "Failed to update task";
+        try {
+          const contentType = response.headers.get("content-type");
+          console.log(`[Toggle Complete] Response content-type: ${contentType}`);
+          
+          if (contentType && contentType.includes("application/json")) {
+            const text = await response.text();
+            console.log(`[Toggle Complete] Response text:`, text);
+            
+            if (text && text.trim()) {
+              try {
+                const errorData = JSON.parse(text);
+                errorMessage = errorData.error || errorData.message || errorMessage;
+                console.error("Error updating task:", errorData);
+              } catch (jsonError) {
+                console.error("Error parsing JSON:", jsonError);
+                errorMessage = text || `Failed to update task (Status: ${response.status})`;
+              }
+            } else {
+              errorMessage = `Failed to update task (Status: ${response.status})`;
+            }
+          } else {
+            const text = await response.text();
+            errorMessage = text || `Failed to update task (Status: ${response.status})`;
+            console.error("Error updating task - non-JSON response:", text);
+          }
+        } catch (parseError) {
+          console.error("Error parsing error response:", parseError);
+          errorMessage = `Failed to update task (Status: ${response.status})`;
+        }
+        alert(errorMessage);
       }
     } catch (error) {
       console.error("Error updating task:", error);
-      alert("Failed to update task. Please try again.");
+      const errorMsg = error instanceof Error ? error.message : "Unknown error";
+      alert(`Failed to update task: ${errorMsg}. Please try again.`);
     }
   };
 

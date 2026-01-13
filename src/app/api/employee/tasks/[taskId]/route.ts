@@ -58,6 +58,9 @@ export async function PATCH(
       }
     }
 
+    // Check if current user is admin
+    const isCurrentUserAdmin = session.user.role === "admin";
+    
     // Check if task creator is admin
     let isCreatorAdmin = false;
     let isUserTaskCreator = false;
@@ -79,29 +82,79 @@ export async function PATCH(
       }
     }
 
+    // Check if user is assigned to this task
+    let isAssignedToTask = false;
+    if (taskAny.assignedTo) {
+      const assignedToId = taskAny.assignedTo instanceof ObjectId 
+        ? taskAny.assignedTo.toString() 
+        : taskAny.assignedTo.toString();
+      isAssignedToTask = assignedToId === userId;
+    }
+    if (!isAssignedToTask && Array.isArray(taskAny.assignees)) {
+      isAssignedToTask = taskAny.assignees.some((assignee: any) => {
+        const assigneeId = assignee instanceof ObjectId ? assignee.toString() : 
+                          (assignee._id ? assignee._id.toString() : assignee.toString());
+        return assigneeId === userId;
+      });
+    }
+
+    // Determine what fields are being updated
+    const isUpdatingStatus = body.status !== undefined;
+    const isUpdatingNotApplicable = body.notApplicable !== undefined;
+    const isUpdatingTimeSpent = body.timeSpent !== undefined;
+    const isUpdatingCustomFieldValues = body.customFieldValues !== undefined;
+    const isUpdatingOtherFields = body.title !== undefined || 
+                                  body.description !== undefined || 
+                                  body.priority !== undefined ||
+                                  body.dueDate !== undefined ||
+                                  body.dueTime !== undefined ||
+                                  body.deadlineDate !== undefined ||
+                                  body.deadlineTime !== undefined ||
+                                  body.taskKind !== undefined ||
+                                  body.customRecurrence !== undefined;
+
     // Permission logic:
-    // 1. Employees can edit tasks they created themselves
-    // 2. Lead assignees can edit any task in their project EXCEPT tasks created by admin
-    // 3. Employees cannot edit tasks assigned to them by lead assignees (unless they created them)
+    // 1. Admin can always edit tasks they created themselves (even if created as admin)
+    // 2. Employees can edit tasks they created themselves
+    // 3. Lead assignees can edit any task in their project EXCEPT tasks created by admin
+    // 4. Assigned employees can update status, notApplicable, timeSpent, and customFieldValues
+    // 5. Employees cannot edit other fields of tasks assigned to them (unless they created them)
     let hasPermission = false;
     
-    if (isUserTaskCreator) {
+    if (isCurrentUserAdmin && isUserTaskCreator) {
+      // Admin created the task - always allow admin to edit their own tasks
+      hasPermission = true;
+    } else if (isUserTaskCreator) {
       // User created the task - always allow editing
       hasPermission = true;
     } else if (isUserLeadAssignee) {
       // User is lead assignee - can edit any task except admin-created ones
       hasPermission = !isCreatorAdmin;
+    } else if (isAssignedToTask && (isUpdatingStatus || isUpdatingNotApplicable || isUpdatingTimeSpent || isUpdatingCustomFieldValues)) {
+      // Assigned employee can update status, notApplicable, timeSpent, and customFieldValues
+      hasPermission = true;
+    } else if (isAssignedToTask && isUpdatingOtherFields) {
+      // Assigned employee cannot edit other fields unless they created the task
+      hasPermission = false;
     } else {
       // Regular employee - can only edit tasks they created
       hasPermission = false;
     }
 
     if (!hasPermission) {
+      // Provide specific error message based on what they're trying to update
+      if (isAssignedToTask && isUpdatingOtherFields) {
+        return NextResponse.json({ 
+          error: "You can only update the status and completion details of tasks assigned to you. You cannot edit other fields unless you created the task.",
+          message: "You can only update the status and completion details of tasks assigned to you."
+        }, { status: 403 });
+      }
+      
       return NextResponse.json({ 
-        error: isCreatorAdmin && isUserLeadAssignee
+        error: isCreatorAdmin && isUserLeadAssignee && !isCurrentUserAdmin
           ? "You cannot edit tasks created by admin. Only admin can edit admin-created tasks."
           : "You can only edit tasks you created yourself. Tasks assigned to you by lead assignees cannot be edited.",
-        message: isCreatorAdmin && isUserLeadAssignee
+        message: isCreatorAdmin && isUserLeadAssignee && !isCurrentUserAdmin
           ? "This task was created by an admin. Only admin can edit admin-created tasks."
           : "You can only edit tasks you created yourself."
       }, { status: 403 });

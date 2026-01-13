@@ -507,7 +507,7 @@ export default function ProjectTaskList() {
     
     try {
       const response = await fetch(`/api/admin/tasks/${task._id}`, {
-        method: 'PUT',
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus }),
       });

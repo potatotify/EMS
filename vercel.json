@@ -1,6 +1,10 @@
 {
   "crons": [
     {
+      "path": "/api/cron/reset-recurring-tasks",
+      "schedule": "0 0 * * *"
+    },
+    {
       "path": "/api/admin/check-daily-tasks-fine",
       "schedule": "0 10 * * *"
     },
