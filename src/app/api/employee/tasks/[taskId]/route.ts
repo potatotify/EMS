@@ -103,6 +103,10 @@ export async function PATCH(
     const isUpdatingNotApplicable = body.notApplicable !== undefined;
     const isUpdatingTimeSpent = body.timeSpent !== undefined;
     const isUpdatingCustomFieldValues = body.customFieldValues !== undefined;
+    const isUpdatingBonusFine = body.bonusPoints !== undefined || 
+                                body.bonusCurrency !== undefined ||
+                                body.penaltyPoints !== undefined ||
+                                body.penaltyCurrency !== undefined;
     const isUpdatingOtherFields = body.title !== undefined || 
                                   body.description !== undefined || 
                                   body.priority !== undefined ||
@@ -116,7 +120,7 @@ export async function PATCH(
     // Permission logic:
     // 1. Admin can always edit tasks they created themselves (even if created as admin)
     // 2. Employees can edit tasks they created themselves
-    // 3. Lead assignees can edit any task in their project EXCEPT tasks created by admin
+    // 3. Lead assignees can edit ANY task in their project (including admin-created ones) EXCEPT bonus/fine fields
     // 4. Assigned employees can update status, notApplicable, timeSpent, and customFieldValues
     // 5. Employees cannot edit other fields of tasks assigned to them (unless they created them)
     let hasPermission = false;
@@ -128,8 +132,13 @@ export async function PATCH(
       // User created the task - always allow editing
       hasPermission = true;
     } else if (isUserLeadAssignee) {
-      // User is lead assignee - can edit any task except admin-created ones
-      hasPermission = !isCreatorAdmin;
+      // Lead assignee - can edit any task in their project (including admin-created ones)
+      // BUT cannot edit bonus/fine fields (those are admin-only)
+      if (isUpdatingBonusFine) {
+        hasPermission = false; // Block bonus/fine updates for lead assignees
+      } else {
+        hasPermission = true; // Allow all other edits
+      }
     } else if (isAssignedToTask && (isUpdatingStatus || isUpdatingNotApplicable || isUpdatingTimeSpent || isUpdatingCustomFieldValues)) {
       // Assigned employee can update status, notApplicable, timeSpent, and customFieldValues
       hasPermission = true;
@@ -143,6 +152,13 @@ export async function PATCH(
 
     if (!hasPermission) {
       // Provide specific error message based on what they're trying to update
+      if (isUserLeadAssignee && isUpdatingBonusFine) {
+        return NextResponse.json({ 
+          error: "You cannot edit bonus or fine fields. Only admin can modify bonus points, bonus currency, penalty points, and penalty currency.",
+          message: "Bonus and fine fields are admin-only."
+        }, { status: 403 });
+      }
+      
       if (isAssignedToTask && isUpdatingOtherFields) {
         return NextResponse.json({ 
           error: "You can only update the status and completion details of tasks assigned to you. You cannot edit other fields unless you created the task.",
@@ -151,16 +167,22 @@ export async function PATCH(
       }
       
       return NextResponse.json({ 
-        error: isCreatorAdmin && isUserLeadAssignee && !isCurrentUserAdmin
-          ? "You cannot edit tasks created by admin. Only admin can edit admin-created tasks."
-          : "You can only edit tasks you created yourself. Tasks assigned to you by lead assignees cannot be edited.",
-        message: isCreatorAdmin && isUserLeadAssignee && !isCurrentUserAdmin
-          ? "This task was created by an admin. Only admin can edit admin-created tasks."
-          : "You can only edit tasks you created yourself."
+        error: "You can only edit tasks you created yourself. Tasks assigned to you by lead assignees cannot be edited.",
+        message: "You can only edit tasks you created yourself."
+      }, { status: 403 });
+    }
+
+    // Block any attempts to update bonus/fine fields (admin-only)
+    // This is an extra safety check even if permission check passes
+    if (isUpdatingBonusFine && !isCurrentUserAdmin) {
+      return NextResponse.json({ 
+        error: "You cannot edit bonus or fine fields. Only admin can modify bonus points, bonus currency, penalty points, and penalty currency.",
+        message: "Bonus and fine fields are admin-only."
       }, { status: 403 });
     }
 
     // Employees can update task fields (title, description, priority, dates, etc.)
+    // Note: bonus/fine fields are intentionally NOT included here - they're admin-only
     if (body.title !== undefined) {
       task.title = body.title;
     }

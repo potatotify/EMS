@@ -191,17 +191,28 @@ export async function PATCH(
       }
     }
 
+    // Check if user is trying to update bonus/fine fields
+    const isUpdatingBonusFine = body.bonusPoints !== undefined || 
+                                body.bonusCurrency !== undefined ||
+                                body.penaltyPoints !== undefined ||
+                                body.penaltyCurrency !== undefined;
+
     // Permission logic:
-    // 1. Admin can always edit
-    // 2. Lead assignees can edit any task in their project EXCEPT tasks created by admin
+    // 1. Admin can always edit everything
+    // 2. Lead assignees can edit ANY task in their project (including admin-created ones) EXCEPT bonus/fine fields
     // 3. Employees can edit tasks they created themselves
     // 4. Otherwise, assigned employees can edit (for backward compatibility)
     let hasPermission = false;
     if (isAdmin) {
       hasPermission = true;
     } else if (isUserLeadAssignee) {
-      // Lead assignee - can edit any task except admin-created ones
-      hasPermission = !isCreatorAdmin;
+      // Lead assignee - can edit any task in their project (including admin-created ones)
+      // BUT cannot edit bonus/fine fields (those are admin-only)
+      if (isUpdatingBonusFine) {
+        hasPermission = false; // Block bonus/fine updates for lead assignees
+      } else {
+        hasPermission = true; // Allow all other edits
+      }
     } else if (isTaskCreator) {
       // User created the task - allow editing
       hasPermission = true;
@@ -211,11 +222,25 @@ export async function PATCH(
     }
 
     if (!hasPermission) {
+      // Provide specific error message for lead assignees trying to edit bonus/fine
+      if (isUserLeadAssignee && isUpdatingBonusFine) {
+        return NextResponse.json({ 
+          error: "You cannot edit bonus or fine fields. Only admin can modify bonus points, bonus currency, penalty points, and penalty currency.",
+          message: "Bonus and fine fields are admin-only."
+        }, { status: 403 });
+      }
+      
       return NextResponse.json({ 
         error: "Forbidden",
-        message: isCreatorAdmin && isUserLeadAssignee
-          ? "You cannot edit tasks created by admin. Only admin can edit admin-created tasks."
-          : "You don't have permission to edit this task."
+        message: "You don't have permission to edit this task."
+      }, { status: 403 });
+    }
+
+    // Extra safety check: Block lead assignees from updating bonus/fine fields
+    if (isUpdatingBonusFine && !isAdmin && isUserLeadAssignee) {
+      return NextResponse.json({ 
+        error: "You cannot edit bonus or fine fields. Only admin can modify bonus points, bonus currency, penalty points, and penalty currency.",
+        message: "Bonus and fine fields are admin-only."
       }, { status: 403 });
     }
 
