@@ -2106,6 +2106,14 @@ function EmployeeTaskForm({
         }
       } else {
         // Create new task
+        // For recurring tasks (daily/weekly/monthly), set deadlineDate to today if deadlineTime is set
+        let deadlineDate = formData.deadlineDate;
+        if ((["daily", "weekly", "monthly"].includes(formData.taskKind)) && formData.deadlineTime && !deadlineDate) {
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          deadlineDate = today.toISOString().split("T")[0];
+        }
+        
         const response = await fetch("/api/employee/tasks/create", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -2115,7 +2123,7 @@ function EmployeeTaskForm({
             section,
             ...formData,
             assignedTo: formData.assignedTo || undefined, // Only send if selected
-            deadlineDate: formData.deadlineDate || undefined,
+            deadlineDate: deadlineDate || undefined,
             deadlineTime: formData.deadlineTime || undefined,
             customRecurrence: formData.taskKind === "custom" ? formData.customRecurrence : undefined,
             customFields: (formData.customFields || []).filter((f) => f.name && f.name.trim() !== ""),
@@ -2346,21 +2354,32 @@ function EmployeeTaskForm({
               onMouseDown={(e) => e.stopPropagation()}
             >
               <div className="space-y-2">
-                <div>
-                  <label className="text-xs text-neutral-600 mb-1 block">Deadline Date</label>
-                  <input
-                    type="date"
-                    value={formData.deadlineDate}
-                    onChange={(e) => setFormData({ ...formData, deadlineDate: e.target.value })}
-                    className="w-full bg-white border border-neutral-300 rounded px-2 py-1.5 text-xs text-neutral-900 focus:outline-none focus:border-emerald-500"
-                  />
-                </div>
+                {!(["daily", "weekly", "monthly"].includes(formData.taskKind)) && (
+                  <div>
+                    <label className="text-xs text-neutral-600 mb-1 block">Deadline Date</label>
+                    <input
+                      type="date"
+                      value={formData.deadlineDate}
+                      onChange={(e) => setFormData({ ...formData, deadlineDate: e.target.value })}
+                      className="w-full bg-white border border-neutral-300 rounded px-2 py-1.5 text-xs text-neutral-900 focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                )}
                 <div>
                   <label className="text-xs text-neutral-600 mb-1 block">Deadline Time</label>
                   <input
                     type="time"
                     value={formData.deadlineTime}
-                    onChange={(e) => setFormData({ ...formData, deadlineTime: e.target.value })}
+                    onChange={(e) => {
+                      const updates: any = { ...formData, deadlineTime: e.target.value };
+                      // For recurring tasks, set deadlineDate to today when deadlineTime is set
+                      if ((["daily", "weekly", "monthly"].includes(formData.taskKind)) && e.target.value) {
+                        const today = new Date();
+                        today.setHours(0, 0, 0, 0);
+                        updates.deadlineDate = today.toISOString().split("T")[0];
+                      }
+                      setFormData(updates);
+                    }}
                     className="w-full bg-white border border-neutral-300 rounded px-2 py-1.5 text-xs text-neutral-900 focus:outline-none focus:border-emerald-500"
                   />
                 </div>

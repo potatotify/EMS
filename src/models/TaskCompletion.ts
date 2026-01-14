@@ -13,6 +13,8 @@ export interface ITaskCompletion extends Document {
   assignedToName?: string;
   assignees?: mongoose.Types.ObjectId[];
   assigneeNames?: string[];
+  assignedDate?: Date; // Original assigned date (for daily tasks that were reset)
+  assignedTime?: string; // Original assigned time
   
   // Completion details
   completedBy: mongoose.Types.ObjectId;
@@ -103,6 +105,12 @@ const TaskCompletionSchema = new Schema<ITaskCompletion>(
     },
     assigneeNames: {
       type: [String],
+    },
+    assignedDate: {
+      type: Date,
+    },
+    assignedTime: {
+      type: String,
     },
     completedBy: {
       type: Schema.Types.ObjectId,

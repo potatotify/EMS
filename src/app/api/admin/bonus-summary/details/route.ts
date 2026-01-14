@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
-import clientPromise from '@/lib/mongodb';
+import clientPromise, { dbConnect } from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
+import Task from '@/models/Task';
 
 export async function GET(request: NextRequest) {
   try {
@@ -14,13 +15,14 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const employeeName = searchParams.get('employeeName');
-    const startDate = searchParams.get('startDate');
-    const endDate = searchParams.get('endDate');
+    const startDateParam = searchParams.get('startDate');
+    const endDateParam = searchParams.get('endDate');
 
     if (!employeeName) {
       return NextResponse.json({ error: 'Employee name is required' }, { status: 400 });
     }
 
+    await dbConnect();
     const client = await clientPromise;
     const db = client.db('worknest');
 
@@ -36,61 +38,45 @@ export async function GET(request: NextRequest) {
 
     const employeeId = employee._id;
 
+    // Build date range - match summary route logic exactly
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    today.setHours(0, 0, 0, 0);
+    
+    const todayEnd = new Date(today);
+    todayEnd.setHours(23, 59, 59, 999);
+
+    const startDate = startDateParam ? new Date(startDateParam) : today;
+    const endDate = endDateParam ? new Date(endDateParam) : todayEnd;
+
     console.log('=== BONUS DETAILS DEBUG ===');
     console.log('Employee ID:', employeeId.toString());
     console.log('Employee Name:', employeeName);
-    console.log('Start Date:', startDate);
-    console.log('End Date:', endDate);
+    console.log('Start Date:', startDate.toISOString());
+    console.log('End Date:', endDate.toISOString());
 
-    // Build date filter
-    const dateFilter: any = {};
-    if (startDate) {
-      dateFilter.$gte = new Date(startDate);
-    }
-    if (endDate) {
-      const endDateTime = new Date(endDate);
-      endDateTime.setHours(23, 59, 59, 999);
-      dateFilter.$lte = endDateTime;
-    }
-
-    console.log('Date Filter:', JSON.stringify(dateFilter));
-
-    // Fetch tasks with bonus/penalty - check both assignees array and assignedTo field
-    // Match the logic from bonus-summary route
-    const tasksQuery: any = {
-      $or: [
-        { assignees: employeeId },
-        { assignees: employeeId.toString() },
-        { assignedTo: employeeId },
-        { assignedTo: employeeId.toString() }
-      ]
+    // Helper to normalize date to yyyy-mm-dd (local time)
+    const toDateKey = (d: Date | string) => {
+      const date = typeof d === "string" ? new Date(d) : d;
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
     };
 
-    // Add date filter if exists
-    if (Object.keys(dateFilter).length > 0) {
-      tasksQuery.$or.push(
-        { createdAt: dateFilter },
-        { completedAt: dateFilter },
-        { tickedAt: dateFilter },
-        { assignedDate: dateFilter }
-      );
-    }
+    const tasksWithDetails: any[] = [];
+    const checklistEntries: any[] = [];
+    const projectEntries: any[] = [];
+    const customBonus: any[] = [];
+    const customFine: any[] = [];
 
-    console.log('Tasks Query:', JSON.stringify(tasksQuery));
+    // ----------------------------
+    // 1) Task-based Rewards/Fines
+    // ----------------------------
+    // Query all tasks - we'll filter by penalty/reward event date later
+    const allTasks = await Task.find({}).lean();
 
-    // Get all tasks
-    const allTasks = await db.collection('tasks').find(tasksQuery).toArray();
-    console.log('All tasks found:', allTasks.length);
-    
-    // Filter to only tasks with bonus or penalty and within date range
-    const tasks = allTasks.filter(task => {
-      const hasBonus = (task.bonusPoints && task.bonusPoints > 0) ||
-                       (task.bonusCurrency && task.bonusCurrency > 0) ||
-                       (task.penaltyPoints && task.penaltyPoints > 0) ||
-                       (task.penaltyCurrency && task.penaltyCurrency > 0);
-      
-      if (!hasBonus) return false;
-
+    for (const task of allTasks as any[]) {
       // Check if this task is for this employee
       let isForEmployee = false;
       if (Array.isArray(task.assignees) && task.assignees.length > 0) {
@@ -101,68 +87,324 @@ export async function GET(request: NextRequest) {
         isForEmployee = task.assignedTo.toString() === employeeId.toString();
       }
 
-      if (!isForEmployee) return false;
+      if (!isForEmployee) continue;
 
-      // Check date if filter exists
-      if (Object.keys(dateFilter).length > 0) {
-        const taskDate = task.tickedAt || task.completedAt || task.assignedDate || task.createdAt;
-        if (!taskDate) return false;
-        
-        const date = new Date(taskDate);
-        if (dateFilter.$gte && date < dateFilter.$gte) return false;
-        if (dateFilter.$lte && date > dateFilter.$lte) return false;
+      const bonus = typeof task.bonusPoints === "number" ? task.bonusPoints : 0;
+      const bonusCurrency = typeof task.bonusCurrency === "number" ? task.bonusCurrency : 0;
+      let penalty = typeof task.penaltyPoints === "number" ? task.penaltyPoints : 0;
+      let penaltyCurrency = typeof task.penaltyCurrency === "number" ? task.penaltyCurrency : 0;
+      
+      // If penaltyCurrency is 0 but penaltyPoints exists, use penaltyPoints as fallback
+      if (penaltyCurrency <= 0 && penalty > 0) {
+        penaltyCurrency = penalty;
       }
 
-      return true;
-    });
+      // Skip tasks marked as not applicable
+      if (task.notApplicable === true) {
+        continue;
+      }
 
-    console.log('Tasks with bonus/penalty for employee:', tasks.length);
-    if (tasks.length > 0) {
-      console.log('First task sample:', {
-        title: tasks[0].title,
-        bonusPoints: tasks[0].bonusPoints,
-        bonusCurrency: tasks[0].bonusCurrency,
-        penaltyPoints: tasks[0].penaltyPoints,
-        penaltyCurrency: tasks[0].penaltyCurrency,
-        assignedTo: tasks[0].assignedTo,
-        assignees: tasks[0].assignees
+      // Determine if this task resulted in reward or fine
+      let baseDate: Date | null = null;
+      let penaltyEventInPeriod = false;
+      let rewardEventInPeriod = false;
+      let shouldGetPenalty = false;
+      let shouldGetReward = false;
+
+      const approvalStatus: string = task.approvalStatus || "pending";
+      const nowLocal = new Date();
+
+      // For recurring tasks (daily/weekly/monthly), use assigned date for deadlineDate if deadlineTime exists
+      const isRecurring = ["daily", "weekly", "monthly"].includes(task.taskKind);
+      
+      if (approvalStatus === "approved") {
+        if (task.status === "completed") {
+          let deadlineDate: Date | null = null;
+
+          if (task.deadlineTime) {
+            // For recurring tasks, use assigned date
+            if (isRecurring && task.assignedDate) {
+              deadlineDate = new Date(task.assignedDate);
+              deadlineDate.setHours(0, 0, 0, 0);
+            } else if (task.deadlineDate) {
+              deadlineDate = new Date(task.deadlineDate);
+              deadlineDate.setHours(0, 0, 0, 0);
+            } else {
+              deadlineDate = new Date();
+              deadlineDate.setHours(0, 0, 0, 0);
+            }
+            
+            // Parse deadline time
+            const [h, m] = task.deadlineTime.split(":");
+            deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+          } else if (task.deadlineDate) {
+            deadlineDate = new Date(task.deadlineDate);
+            deadlineDate.setHours(23, 59, 59, 999);
+          } else if (task.dueDate) {
+            deadlineDate = new Date(task.dueDate);
+            if (task.dueTime) {
+              const [h, m] = task.dueTime.split(":");
+              deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+            } else {
+              deadlineDate.setHours(23, 59, 59, 999);
+            }
+          }
+
+          const completedAt = task.tickedAt || task.completedAt || task.updatedAt || nowLocal;
+
+          if (deadlineDate && completedAt > deadlineDate) {
+            shouldGetPenalty = true;
+            // Penalty event is when task was completed late
+            baseDate = completedAt;
+            const completedDate = new Date(completedAt);
+            const deadlineDateObj = deadlineDate;
+            
+            // Include if completion happened in period OR deadline was in period
+            if ((completedDate >= startDate && completedDate <= endDate) ||
+                (deadlineDateObj >= startDate && deadlineDateObj <= endDate)) {
+              penaltyEventInPeriod = true;
+            }
+          } else if (bonus > 0 || bonusCurrency > 0) {
+            shouldGetReward = true;
+            // Reward event is when task was completed on time
+            baseDate = completedAt;
+            const completedDate = new Date(completedAt);
+            if (completedDate >= startDate && completedDate <= endDate) {
+              rewardEventInPeriod = true;
+            }
+          }
+          
+          // Set baseDate if not set yet
+          if (!baseDate) {
+            baseDate = completedAt || task.assignedDate || task.createdAt;
+          }
+        } else {
+          // Not completed but approved - if deadline passed, treat as penalty if configured
+          let deadlineDate: Date | null = null;
+          if (task.deadlineTime) {
+            // For recurring tasks, use today's date
+            if (isRecurring) {
+              const today = new Date();
+              today.setHours(0, 0, 0, 0);
+              deadlineDate = task.deadlineDate ? new Date(task.deadlineDate) : today;
+              deadlineDate.setHours(0, 0, 0, 0);
+            } else if (task.deadlineDate) {
+              deadlineDate = new Date(task.deadlineDate);
+              deadlineDate.setHours(0, 0, 0, 0);
+            } else {
+              deadlineDate = new Date();
+              deadlineDate.setHours(0, 0, 0, 0);
+            }
+            
+            // Parse deadline time
+            const [h, m] = task.deadlineTime.split(":");
+            deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+          } else if (task.deadlineDate) {
+            deadlineDate = new Date(task.deadlineDate);
+            deadlineDate.setHours(23, 59, 59, 999);
+          } else if (task.dueDate) {
+            deadlineDate = new Date(task.dueDate);
+            if (task.dueTime) {
+              const [h, m] = task.dueTime.split(":");
+              deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+            } else {
+              deadlineDate.setHours(23, 59, 59, 999);
+            }
+          }
+          if (deadlineDate && nowLocal > deadlineDate) {
+            shouldGetPenalty = true;
+            // Penalty event is when deadline passed
+            baseDate = deadlineDate;
+            if (deadlineDate >= startDate && deadlineDate <= endDate) {
+              penaltyEventInPeriod = true;
+            }
+          }
+          
+          // Set baseDate if not set yet
+          if (!baseDate) {
+            baseDate = task.assignedDate || task.createdAt;
+          }
+        }
+      } else if (
+        approvalStatus === "rejected" ||
+        approvalStatus === "deadline_passed"
+      ) {
+        if (penalty > 0 || penaltyCurrency > 0) {
+          shouldGetPenalty = true;
+          // Penalty event is when task was rejected or deadline passed
+          baseDate = task.approvedAt || task.updatedAt || task.createdAt;
+          if (baseDate) {
+            const approvedDate = new Date(baseDate);
+            if (approvedDate >= startDate && approvedDate <= endDate) {
+              penaltyEventInPeriod = true;
+            }
+          }
+        }
+        
+        // Set baseDate if not set yet
+        if (!baseDate) {
+          baseDate = task.assignedDate || task.createdAt;
+        }
+      } else {
+        // Task not approved yet - set baseDate for potential future processing
+        baseDate = task.assignedDate || task.createdAt;
+      }
+
+      // Only include if penalty/reward event occurred in the period
+      if (shouldGetPenalty && !penaltyEventInPeriod) {
+        continue; // Skip if penalty event was outside the period
+      }
+      
+      if (shouldGetReward && !rewardEventInPeriod) {
+        continue; // Skip if reward event was outside the period
+      }
+
+      // Skip if no bonus or penalty to show
+      if (!shouldGetPenalty && !shouldGetReward) {
+        continue;
+      }
+
+      if (!baseDate) continue;
+
+      // Get project name
+      let projectName = 'Unknown Project';
+      if (task.projectId) {
+        const project = await db.collection('projects').findOne({
+          _id: new ObjectId(task.projectId)
+        });
+        if (project) {
+          projectName = project.projectName;
+        }
+      }
+
+      tasksWithDetails.push({
+        date: baseDate,
+        taskTitle: task.title,
+        projectName,
+        bonusPoints: shouldGetReward ? bonus : 0,
+        bonusCurrency: shouldGetReward ? bonusCurrency : 0,
+        penaltyPoints: shouldGetPenalty ? penalty : 0,
+        penaltyCurrency: shouldGetPenalty ? penaltyCurrency : 0
       });
     }
 
-    // Populate project names for tasks
-    const tasksWithDetails = await Promise.all(
-      tasks.map(async (task) => {
-        let projectName = 'Unknown Project';
-        if (task.projectId) {
-          const project = await db.collection('projects').findOne({
-            _id: new ObjectId(task.projectId)
-          });
-          if (project) {
-            projectName = project.projectName;
+    // ----------------------------
+    // 2) TaskCompletion Records (Historical tasks that were reset)
+    // ----------------------------
+    const TaskCompletion = (await import("@/models/TaskCompletion")).default;
+    const taskCompletions = await TaskCompletion.find({
+      approvalStatus: { $in: ["approved", "rejected", "deadline_passed"] }
+    }).lean();
+
+    for (const completion of taskCompletions as any[]) {
+      // Check if completion is for this employee
+      let isForEmployee = false;
+      if (Array.isArray(completion.assignees) && completion.assignees.length > 0) {
+        isForEmployee = completion.assignees.some((id: any) => 
+          id && (id.toString() === employeeId.toString())
+        );
+      } else if (completion.assignedTo) {
+        isForEmployee = completion.assignedTo.toString() === employeeId.toString();
+      } else if (completion.completedBy) {
+        isForEmployee = completion.completedBy.toString() === employeeId.toString();
+      }
+
+      if (!isForEmployee) continue;
+
+      // Check if completion event occurred within the period
+      const completionDate = completion.approvedAt || completion.tickedAt || completion.completedAt || completion.createdAt;
+      if (!completionDate) continue;
+      
+      const eventDate = new Date(completionDate);
+      if (eventDate < startDate || eventDate > endDate) {
+        continue; // Skip if outside period
+      }
+
+      const bonusCurrency = typeof completion.bonusCurrency === "number" ? completion.bonusCurrency : 0;
+      const penaltyCurrency = typeof completion.penaltyCurrency === "number" ? completion.penaltyCurrency : 0;
+      
+      // Use penaltyPoints as fallback if penaltyCurrency is 0
+      let finalPenaltyCurrency = penaltyCurrency;
+      if (penaltyCurrency <= 0 && completion.penaltyPoints > 0) {
+        finalPenaltyCurrency = completion.penaltyPoints;
+      }
+
+      const nowLocal = new Date();
+
+      // Determine if this completion resulted in reward or fine
+      let shouldGetPenalty = false;
+      let shouldGetReward = false;
+
+      if (completion.approvalStatus === "approved") {
+        // Check if task was completed late
+        let deadlineDate: Date | null = null;
+        if (completion.deadlineDate) {
+          deadlineDate = new Date(completion.deadlineDate);
+          if (completion.deadlineTime) {
+            const [h, m] = completion.deadlineTime.split(":");
+            deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+          } else {
+            deadlineDate.setHours(23, 59, 59, 999);
+          }
+        } else if (completion.dueDate) {
+          deadlineDate = new Date(completion.dueDate);
+          if (completion.dueTime) {
+            const [h, m] = completion.dueTime.split(":");
+            deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+          } else {
+            deadlineDate.setHours(23, 59, 59, 999);
           }
         }
 
-        return {
-          date: task.completedAt || task.createdAt,
-          taskTitle: task.title,
-          projectName,
-          bonusPoints: task.bonusPoints || 0,
-          bonusCurrency: task.bonusCurrency || 0,
-          penaltyPoints: task.penaltyPoints || 0,
-          penaltyCurrency: task.penaltyCurrency || 0
-        };
-      })
-    );
+        const completedAt = completion.tickedAt || completion.completedAt || completionDate;
+        if (deadlineDate && completedAt > deadlineDate) {
+          shouldGetPenalty = true;
+        } else if (bonusCurrency > 0 || (completion.bonusPoints && completion.bonusPoints > 0)) {
+          shouldGetReward = true;
+        }
+      } else if (completion.approvalStatus === "rejected" || completion.approvalStatus === "deadline_passed") {
+        if (finalPenaltyCurrency > 0) {
+          shouldGetPenalty = true;
+        }
+      }
 
-    // Fetch checklist rewards/fines from daily updates
+      // Skip if no bonus or penalty to show
+      if (!shouldGetPenalty && !shouldGetReward) {
+        continue;
+      }
+
+      // Get project name
+      let projectName = 'Unknown Project';
+      if (completion.projectId) {
+        const project = await db.collection('projects').findOne({
+          _id: new ObjectId(completion.projectId)
+        });
+        if (project) {
+          projectName = project.projectName;
+        }
+      }
+
+      tasksWithDetails.push({
+        date: completionDate,
+        taskTitle: completion.title || 'Task',
+        projectName,
+        bonusPoints: shouldGetReward ? (completion.bonusPoints || 0) : 0,
+        bonusCurrency: shouldGetReward ? bonusCurrency : 0,
+        penaltyPoints: shouldGetPenalty ? (completion.penaltyPoints || 0) : 0,
+        penaltyCurrency: shouldGetPenalty ? finalPenaltyCurrency : 0
+      });
+    }
+
+    console.log('Tasks with bonus/penalty for employee:', tasksWithDetails.length);
+
+    // ----------------------------
+    // 3) Checklist Rewards/Fines from Daily Updates
+    // ----------------------------
     const dailyUpdatesQuery: any = {
       employeeId: employeeId,
-      adminApproved: true
+      adminApproved: true,
+      date: { $gte: startDate, $lte: endDate }
     };
-
-    if (Object.keys(dateFilter).length > 0) {
-      dailyUpdatesQuery.date = dateFilter;
-    }
 
     const dailyUpdates = await db.collection('dailyUpdates').find(dailyUpdatesQuery).toArray();
     console.log('Daily updates found:', dailyUpdates.length);
@@ -185,7 +427,6 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const checklistEntries: any[] = [];
     for (const du of dailyUpdates) {
       if (!du.checklist || !Array.isArray(du.checklist)) continue;
       
@@ -222,23 +463,14 @@ export async function GET(request: NextRequest) {
 
     console.log('Checklist entries with rewards/penalties:', checklistEntries.length);
 
-    // Fetch project rewards/fines
-    const projectsQuery: any = {
-      leadAssignee: { $in: [employeeId, employeeId.toString()] }
-    };
+    // ----------------------------
+    // 4) Project-level Rewards/Fines
+    // ----------------------------
+    const projects = await db.collection('projects').find({
+      leadAssignee: { $in: [employeeId, employeeId.toString()] },
+      assignedAt: { $gte: startDate, $lte: endDate }
+    }).toArray();
 
-    if (Object.keys(dateFilter).length > 0) {
-      projectsQuery.$or = [
-        { assignedAt: dateFilter },
-        { updatedAt: dateFilter },
-        { createdAt: dateFilter }
-      ];
-    }
-
-    const projects = await db.collection('projects').find(projectsQuery).toArray();
-    console.log('Projects found:', projects.length);
-
-    const projectEntries: any[] = [];
     for (const project of projects) {
       const bonusPoints = project.bonusPoints || 0;
       const bonusCurrency = project.bonusCurrency || 0;
@@ -260,61 +492,95 @@ export async function GET(request: NextRequest) {
 
     console.log('Project entries with rewards/penalties:', projectEntries.length);
 
-    // Fetch custom bonus entries
-    const customBonusQuery: any = {
-      $or: [
-        { employeeId: employeeId },
-        { employeeId: employeeId.toString() }
-      ],
-      'customBonusEntries.0': { $exists: true }
-    };
-    if (Object.keys(dateFilter).length > 0) {
-      customBonusQuery.date = dateFilter;
-    }
-
-    const customBonusRows = await db.collection('bonusSummary').find(customBonusQuery).toArray();
-    const customBonus: any[] = [];
+    // ----------------------------
+    // 5) Custom Bonus/Fine Entries
+    // ----------------------------
+    // Use date keys (YYYY-MM-DD strings) to match summary route logic
+    const startDateKey = toDateKey(startDate);
+    const endDateKey = toDateKey(endDate);
     
-    customBonusRows.forEach(row => {
-      if (row.customBonusEntries && Array.isArray(row.customBonusEntries)) {
-        row.customBonusEntries.forEach((entry: any) => {
-          customBonus.push({
-            date: row.date,
-            description: entry.description,
-            type: entry.type,
-            value: entry.value
-          });
-        });
-      }
-    });
-
-    // Fetch custom fine entries
-    const customFineQuery: any = {
-      $or: [
-        { employeeId: employeeId },
-        { employeeId: employeeId.toString() }
-      ],
-      'customFineEntries.0': { $exists: true }
+    // Helper to normalize employeeId to string (handle both ObjectId and string)
+    const normalizeEmployeeId = (id: any): string => {
+      if (!id) return '';
+      if (id instanceof ObjectId) return id.toString();
+      if (typeof id === 'string') return id;
+      if (id && typeof id === 'object' && id.toString) return id.toString();
+      return String(id);
     };
-    if (Object.keys(dateFilter).length > 0) {
-      customFineQuery.date = dateFilter;
-    }
-
-    const customFineRows = await db.collection('bonusSummary').find(customFineQuery).toArray();
-    const customFine: any[] = [];
     
-    customFineRows.forEach(row => {
-      if (row.customFineEntries && Array.isArray(row.customFineEntries)) {
-        row.customFineEntries.forEach((entry: any) => {
-          customFine.push({
-            date: row.date,
-            description: entry.description,
-            type: entry.type,
-            value: entry.value
-          });
-        });
+    const normalizedEmployeeId = normalizeEmployeeId(employeeId);
+    
+    // Fetch custom bonus/fine data from customBonusFine collection (matching summary route)
+    const customBonusFineData = await db
+      .collection("customBonusFine")
+      .find({
+        date: { $gte: startDateKey, $lte: endDateKey }
+      })
+      .toArray();
+    
+    console.log(`[Bonus Details] Found ${customBonusFineData.length} custom bonus/fine records between ${startDateKey} and ${endDateKey}`);
+    
+    // Transform entries to ensure they match the expected format
+    const transformEntries = (entries: any[]) => {
+      const transformed: any[] = [];
+      for (const entry of entries) {
+        // If entry already has the correct format, add as is
+        if (entry.type && entry.value !== undefined) {
+          transformed.push(entry);
+        } else if (entry.finePoints !== undefined || entry.fineCurrency !== undefined) {
+          // If entry has finePoints/fineCurrency (old format), convert to new format
+          if (entry.finePoints > 0) {
+            transformed.push({
+              type: 'points',
+              value: entry.finePoints,
+              description: entry.description || 'Custom fine'
+            });
+          }
+          if (entry.fineCurrency > 0) {
+            transformed.push({
+              type: 'currency',
+              value: entry.fineCurrency,
+              description: entry.description || 'Custom fine'
+            });
+          }
+        }
       }
-    });
+      return transformed;
+    };
+    
+    // Filter and process custom entries for this employee
+    for (const custom of customBonusFineData) {
+      const customEmployeeId = normalizeEmployeeId(custom.employeeId);
+      
+      // Only include entries for this employee
+      if (customEmployeeId !== normalizedEmployeeId) {
+        continue;
+      }
+      
+      // Transform and add bonus entries
+      const bonusEntries = transformEntries(custom.customBonusEntries || []);
+      bonusEntries.forEach((entry: any) => {
+        customBonus.push({
+          date: custom.date,
+          description: entry.description,
+          type: entry.type,
+          value: entry.value
+        });
+      });
+      
+      // Transform and add fine entries
+      const fineEntries = transformEntries(custom.customFineEntries || []);
+      fineEntries.forEach((entry: any) => {
+        customFine.push({
+          date: custom.date,
+          description: entry.description,
+          type: entry.type,
+          value: entry.value
+        });
+      });
+    }
+    
+    console.log(`[Bonus Details] Custom bonus entries: ${customBonus.length}, Custom fine entries: ${customFine.length}`);
 
     // Calculate summary
     let totalPointsEarned = 0;

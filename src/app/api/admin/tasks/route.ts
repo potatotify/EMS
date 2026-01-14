@@ -271,6 +271,14 @@ export async function POST(request: NextRequest) {
     // Type assertion for maxOrderTask
     const maxOrderTaskAny = maxOrderTask as any;
 
+    // For recurring tasks (daily/weekly/monthly), set deadlineDate to today if deadlineTime is set but deadlineDate is not
+    let finalDeadlineDate = deadlineDate;
+    if ((["daily", "weekly", "monthly"].includes(taskKind || "")) && deadlineTime && !deadlineDate) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      finalDeadlineDate = today.toISOString().split("T")[0];
+    }
+
     const newTask = new Task({
       projectId: new ObjectId(projectId),
       projectName: projectName || project.projectName,
@@ -286,7 +294,7 @@ export async function POST(request: NextRequest) {
       assignedTime: assignedTime || undefined,
       dueDate: dueDate ? new Date(dueDate) : undefined,
       dueTime: dueTime || undefined,
-      deadlineDate: deadlineDate ? new Date(deadlineDate) : undefined,
+      deadlineDate: finalDeadlineDate ? new Date(finalDeadlineDate) : undefined,
       deadlineTime: deadlineTime || undefined,
       priority: priority || 2,
       bonusPoints: bonusPoints || 0,

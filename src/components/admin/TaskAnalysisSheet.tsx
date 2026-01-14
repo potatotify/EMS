@@ -6,7 +6,7 @@ import LoadingSpinner from "@/components/shared/LoadingSpinner";
 
 interface TaskAnalysisData {
   _id: string;
-  entryType?: "task" | "hackathon";
+  entryType?: "task" | "hackathon" | "task_completion";
   projectName: string;
   personAssignedTo: string;
   taskAssignedBy: string;
@@ -38,6 +38,11 @@ interface TaskAnalysisData {
   }>;
   customFieldValues?: Record<string, any>;
   createdByEmployee?: boolean;
+  isHistorical?: boolean;
+  isTaskCompletion?: boolean;
+  projectDeleted?: boolean;
+  projectExists?: boolean;
+  taskId?: string | null;
 }
 
 export default function TaskAnalysisSheet() {
@@ -77,21 +82,35 @@ export default function TaskAnalysisSheet() {
     fetchTasks();
   }, []);
 
-  const handleApprove = async (taskId: string, approve: boolean, bonusPoints?: number, bonusCurrency?: number, penaltyPoints?: number, penaltyCurrency?: number) => {
+  const handleApprove = async (taskId: string, approve: boolean, bonusPoints?: number, bonusCurrency?: number, penaltyPoints?: number, penaltyCurrency?: number, isTaskCompletion?: boolean) => {
     setApprovingTaskId(taskId);
     try {
+      // Find the task to check if it's a TaskCompletion record
+      const task = tasks.find(t => t._id === taskId);
+      const isTaskCompletionRecord = isTaskCompletion !== undefined 
+        ? isTaskCompletion 
+        : (task?.isTaskCompletion || task?.isHistorical || task?.entryType === "task_completion");
+      
+      console.log(`[TaskAnalysis] Approving task ${taskId}, isTaskCompletion: ${isTaskCompletionRecord}, entryType: ${task?.entryType}`);
+      
       const response = await fetch(`/api/admin/tasks/${taskId}/approve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ approve, bonusPoints, bonusCurrency, penaltyPoints, penaltyCurrency }),
+        body: JSON.stringify({ approve, bonusPoints, bonusCurrency, penaltyPoints, penaltyCurrency, isTaskCompletion: isTaskCompletionRecord }),
       });
 
       if (response.ok) {
+        const result = await response.json();
         // After approval/rejection, re-fetch from server so data is consistent
         await fetchTasks();
         setEditingApprovalTaskId(null);
         setSettingPointsTaskId(null);
         setPointsForm({ bonusPoints: 0, bonusCurrency: 0, penaltyPoints: 0, penaltyCurrency: 0 });
+        
+        // Show message if project was deleted
+        if (result.task?.projectDeleted) {
+          alert("Task approved successfully. Note: The project for this task has been deleted.");
+        }
       } else {
         const errorData = await response.json();
         if (errorData.requiresPoints) {
@@ -510,7 +529,19 @@ export default function TaskAnalysisSheet() {
                       className="hover:bg-neutral-50 transition-colors"
                     >
                       <td className="px-4 py-3 text-sm text-neutral-900 border-r border-neutral-200 sticky left-0 bg-white z-0">
-                        {task.projectName}
+                        <div className="flex items-center gap-2">
+                          <span>{task.projectName}</span>
+                          {task.projectDeleted && (
+                            <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded text-xs font-medium">
+                              Project Deleted
+                            </span>
+                          )}
+                          {task.isTaskCompletion && (
+                            <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-medium">
+                              Historical
+                            </span>
+                          )}
+                        </div>
                       </td>
                     <td className="px-4 py-3 text-sm text-neutral-700 border-r border-neutral-200">
                       {task.personAssignedTo}
@@ -711,7 +742,7 @@ export default function TaskAnalysisSheet() {
                           </div>
                           <div className="flex gap-2 mt-2">
                             <button
-                              onClick={() => handleApprove(task._id, true, pointsForm.bonusPoints, pointsForm.bonusCurrency, pointsForm.penaltyPoints, pointsForm.penaltyCurrency)}
+                              onClick={() => handleApprove(task._id, true, pointsForm.bonusPoints, pointsForm.bonusCurrency, pointsForm.penaltyPoints, pointsForm.penaltyCurrency, task.isTaskCompletion)}
                               disabled={approvingTaskId === task._id}
                               className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs disabled:opacity-50"
                             >
@@ -732,7 +763,7 @@ export default function TaskAnalysisSheet() {
                         // Edit mode: show Approve/Reject buttons
                         <div className="flex items-center gap-2">
                           <button
-                            onClick={() => handleApprove(task._id, true)}
+                            onClick={() => handleApprove(task._id, true, undefined, undefined, undefined, undefined, task.isTaskCompletion)}
                             disabled={approvingTaskId === task._id}
                             className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                           >
@@ -740,7 +771,7 @@ export default function TaskAnalysisSheet() {
                             Approve
                           </button>
                           <button
-                            onClick={() => handleApprove(task._id, false)}
+                            onClick={() => handleApprove(task._id, false, undefined, undefined, undefined, undefined, task.isTaskCompletion)}
                             disabled={approvingTaskId === task._id}
                             className="inline-flex items-center gap-1 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                           >
@@ -802,7 +833,7 @@ export default function TaskAnalysisSheet() {
                                 Set Points & Approve
                               </button>
                               <button
-                                onClick={() => handleApprove(task._id, false)}
+                                onClick={() => handleApprove(task._id, false, undefined, undefined, undefined, undefined, task.isTaskCompletion)}
                                 disabled={approvingTaskId === task._id}
                                 className="inline-flex items-center gap-1 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                               >
@@ -814,15 +845,15 @@ export default function TaskAnalysisSheet() {
                         ) : (
                           <div className="flex items-center gap-2">
                             <button
-                              onClick={() => handleApprove(task._id, true)}
-                              disabled={approvingTaskId === task._id}
-                              className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                              <CheckCircle className="w-3 h-3" />
-                              Approve
-                            </button>
-                            <button
-                              onClick={() => handleApprove(task._id, false)}
+                            onClick={() => handleApprove(task._id, true, undefined, undefined, undefined, undefined, task.isTaskCompletion)}
+                            disabled={approvingTaskId === task._id}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <CheckCircle className="w-3 h-3" />
+                            Approve
+                          </button>
+                          <button
+                            onClick={() => handleApprove(task._id, false, undefined, undefined, undefined, undefined, task.isTaskCompletion)}
                               disabled={approvingTaskId === task._id}
                               className="inline-flex items-center gap-1 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                             >

@@ -184,6 +184,14 @@ export async function POST(request: NextRequest) {
     const assignedDate = now.toISOString().split("T")[0];
     const assignedTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
 
+    // For recurring tasks (daily/weekly/monthly), set deadlineDate to today if deadlineTime is set but deadlineDate is not
+    let finalDeadlineDate = deadlineDate;
+    if ((["daily", "weekly", "monthly"].includes(taskKind || "")) && deadlineTime && !deadlineDate) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      finalDeadlineDate = today.toISOString().split("T")[0];
+    }
+
     // Create task - employee-created tasks have no bonus/penalty
     const newTask = new Task({
       projectId: new ObjectId(projectId),
@@ -198,7 +206,7 @@ export async function POST(request: NextRequest) {
       assignedTime,
       dueDate: dueDate ? new Date(dueDate) : undefined,
       dueTime: dueTime || undefined,
-      deadlineDate: deadlineDate ? new Date(deadlineDate) : undefined,
+      deadlineDate: finalDeadlineDate ? new Date(finalDeadlineDate) : undefined,
       deadlineTime: deadlineTime || undefined,
       priority: priority || 2,
       // No bonusPoints or penaltyPoints for employee-created tasks

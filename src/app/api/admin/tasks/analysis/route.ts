@@ -184,14 +184,28 @@ export async function GET(request: NextRequest) {
         let deadlinePassed = false;
         let deadlineDate: Date | null = null;
         
-        if (task.deadlineDate) {
-          deadlineDate = new Date(task.deadlineDate);
-          if (task.deadlineTime) {
-            const [hours, minutes] = task.deadlineTime.split(":");
-            deadlineDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+        // For recurring tasks (daily/weekly/monthly), use today's date if deadlineTime exists
+        const isRecurring = ["daily", "weekly", "monthly"].includes(task.taskKind);
+        
+        if (task.deadlineTime) {
+          // For recurring tasks, deadlineDate should be today's date
+          if (isRecurring) {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            deadlineDate = task.deadlineDate ? new Date(task.deadlineDate) : today;
+            deadlineDate.setHours(0, 0, 0, 0);
           } else {
-            deadlineDate.setHours(23, 59, 59, 999);
+            deadlineDate = task.deadlineDate ? new Date(task.deadlineDate) : new Date();
+            deadlineDate.setHours(0, 0, 0, 0);
           }
+          
+          // Parse deadline time
+          const [hours, minutes] = task.deadlineTime.split(":");
+          deadlineDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+          deadlinePassed = now > deadlineDate;
+        } else if (task.deadlineDate) {
+          deadlineDate = new Date(task.deadlineDate);
+          deadlineDate.setHours(23, 59, 59, 999);
           deadlinePassed = now > deadlineDate;
         } else if (task.dueDate) {
           deadlineDate = new Date(task.dueDate);
@@ -323,6 +337,26 @@ export async function GET(request: NextRequest) {
           employeeGot = "";
         }
 
+        // Check if project exists
+        let projectExists = true;
+        let projectDeleted = false;
+        try {
+          const projectCheck = await projectsCollection.findOne(
+            { _id: task.projectId instanceof ObjectId ? task.projectId : new ObjectId(task.projectId) }
+          );
+          projectExists = !!projectCheck;
+          projectDeleted = !projectCheck;
+          if (projectDeleted) {
+            projectName = `${projectName} (Project Deleted)`;
+          }
+        } catch (e) {
+          projectDeleted = true;
+          projectName = `${projectName} (Project Deleted)`;
+        }
+
+        // Get ticked/completed date for sorting
+        const tickedAtDate = task.tickedAt || task.completedAt || task.createdAt;
+        
         return {
           _id: task._id.toString(),
           entryType: "task",
@@ -332,8 +366,8 @@ export async function GET(request: NextRequest) {
           taskName: task.title,
           taskKind: task.taskKind || "one-time",
           sectionName: task.section || "No Section",
-          assignedAtDate: task.assignedDate ? formatDate(task.assignedDate) : "",
-          assignedAtTime: task.assignedTime || (task.assignedDate ? formatTime(task.assignedDate) : ""),
+          assignedAtDate: task.assignedDate ? formatDate(task.assignedDate) : (task.createdAt ? formatDate(task.createdAt) : ""),
+          assignedAtTime: task.assignedTime || (task.assignedDate ? formatTime(task.assignedDate) : (task.createdAt ? formatTime(task.createdAt) : "")),
           dateDue: task.dueDate ? formatDate(task.dueDate) : "",
           timeDue: task.dueTime || (task.dueDate ? formatTime(task.dueDate) : ""),
           deadlineDate: task.deadlineDate ? formatDate(task.deadlineDate) : "",
@@ -348,6 +382,12 @@ export async function GET(request: NextRequest) {
             }
             return "";
           })(),
+          // Add raw date fields for sorting
+          tickedAt: tickedAtDate ? new Date(tickedAtDate).toISOString() : null,
+          completedAt: task.completedAt ? new Date(task.completedAt).toISOString() : null,
+          createdAt: task.createdAt ? new Date(task.createdAt).toISOString() : null,
+          projectDeleted,
+          projectExists,
           rewardsPoint: task.bonusPoints || 0,
           rewardsCurrency: task.bonusCurrency || 0,
           penaltyPoint: task.penaltyPoints || 0,
@@ -456,6 +496,10 @@ export async function GET(request: NextRequest) {
             }
             return '';
           })(),
+          // Add raw date fields for sorting
+          tickedAt: subtask.tickedAt ? new Date(subtask.tickedAt).toISOString() : (subtask.completedAt ? new Date(subtask.completedAt).toISOString() : null),
+          completedAt: subtask.completedAt ? new Date(subtask.completedAt).toISOString() : null,
+          createdAt: subtask.createdAt ? new Date(subtask.createdAt).toISOString() : null,
           rewardsPoint: 0, // Subtasks don't have individual rewards
           rewardsCurrency: 0,
           penaltyPoint: 0,
@@ -619,17 +663,77 @@ export async function GET(request: NextRequest) {
           }
         }
 
+        // Check if project exists
+        let projectExists = true;
+        let projectDeleted = false;
+        let projectNameDisplay = completion.projectName || "Unknown";
+        try {
+          const projectCheck = await projectsCollection.findOne(
+            { _id: completion.projectId instanceof ObjectId ? completion.projectId : new ObjectId(completion.projectId) }
+          );
+          projectExists = !!projectCheck;
+          projectDeleted = !projectCheck;
+          if (projectDeleted) {
+            projectNameDisplay = `${completion.projectName} (Project Deleted)`;
+          }
+        } catch (e) {
+          projectDeleted = true;
+          projectNameDisplay = `${completion.projectName} (Project Deleted)`;
+        }
+
+        // Get assigned date/time - prefer stored assignedDate/assignedTime, then try original task, then tickedAt
+        let assignedAtDate = "";
+        let assignedAtTime = "";
+        
+        // First check if assignedDate/assignedTime are stored in completion record
+        if (completion.assignedDate) {
+          assignedAtDate = formatDate(completion.assignedDate);
+          assignedAtTime = completion.assignedTime || formatTime(completion.assignedDate);
+        } else {
+          // Try to get original task's assignedDate/assignedTime if task still exists
+          try {
+            if (completion.taskId) {
+              const originalTask = await tasksCollection.findOne(
+                { _id: completion.taskId instanceof ObjectId ? completion.taskId : new ObjectId(completion.taskId) },
+                { projection: { assignedDate: 1, assignedTime: 1, createdAt: 1 } }
+              );
+              if (originalTask) {
+                // Use original task's assignedDate/assignedTime if available
+                if (originalTask.assignedDate) {
+                  assignedAtDate = formatDate(originalTask.assignedDate);
+                  assignedAtTime = originalTask.assignedTime || formatTime(originalTask.assignedDate);
+                } else if (originalTask.createdAt) {
+                  assignedAtDate = formatDate(originalTask.createdAt);
+                  assignedAtTime = formatTime(originalTask.createdAt);
+                }
+              }
+            }
+          } catch (e) {
+            // Ignore errors
+          }
+          
+          // If we couldn't get original task date, use tickedAt (when employee actually worked on it)
+          if (!assignedAtDate && completion.tickedAt) {
+            assignedAtDate = formatDate(completion.tickedAt);
+            assignedAtTime = formatTime(completion.tickedAt);
+          } else if (!assignedAtDate && completion.createdAt) {
+            // Last fallback: use completion record creation date
+            assignedAtDate = formatDate(completion.createdAt);
+            assignedAtTime = formatTime(completion.createdAt);
+          }
+        }
+
         return {
           _id: completion._id.toString(),
           entryType: "task_completion",
-          projectName: completion.projectName,
+          projectName: projectNameDisplay,
           personAssignedTo: completion.assignedToName || completion.assigneeNames?.[0] || "Unknown",
           taskAssignedBy: "Admin", // Historical data, assume admin
           taskName: `${completion.taskTitle} (${completion.taskKind})`,
           taskKind: completion.taskKind,
           sectionName: completion.section || "No Section",
-          assignedAtDate: "", // Not tracked in completion history
-          assignedAtTime: "",
+          assignedAtDate,
+          assignedAtTime,
           dateDue: completion.dueDate ? formatDate(completion.dueDate) : "",
           timeDue: completion.dueTime || "",
           deadlineDate: completion.deadlineDate ? formatDate(completion.deadlineDate) : "",
@@ -637,6 +741,10 @@ export async function GET(request: NextRequest) {
           priority: completion.priority || 2,
           tickedBy: completion.completedByName || "",
           tickedTime: completion.tickedAt ? `${formatDate(completion.tickedAt)} ${formatTime(completion.tickedAt)}` : "",
+          // Add raw date fields for sorting
+          tickedAt: completion.tickedAt ? new Date(completion.tickedAt).toISOString() : null,
+          completedAt: completion.completedAt ? new Date(completion.completedAt).toISOString() : null,
+          createdAt: completion.createdAt ? new Date(completion.createdAt).toISOString() : null,
           rewardsPoint: completion.bonusPoints || 0,
           rewardsCurrency: completion.bonusCurrency || 0,
           penaltyPoint: completion.penaltyPoints || 0,
@@ -650,6 +758,10 @@ export async function GET(request: NextRequest) {
           customFieldValues: completion.customFieldValues || {},
           createdByEmployee: false,
           isHistorical: true, // Flag to indicate this is historical data
+          isTaskCompletion: true, // Flag to indicate this is a TaskCompletion record
+          projectDeleted,
+          projectExists,
+          taskId: completion.taskId ? completion.taskId.toString() : null, // Include original taskId if available
         };
       })
     );
@@ -695,6 +807,10 @@ export async function GET(request: NextRequest) {
           priority: 2,
           tickedBy: completion.completedByName || '',
           tickedTime: completion.tickedAt ? `${formatDate(completion.tickedAt)} ${formatTime(completion.tickedAt)}` : '',
+          // Add raw date fields for sorting
+          tickedAt: completion.tickedAt ? new Date(completion.tickedAt).toISOString() : null,
+          completedAt: completion.completedAt ? new Date(completion.completedAt).toISOString() : null,
+          createdAt: completion.createdAt ? new Date(completion.createdAt).toISOString() : null,
           rewardsPoint: 0,
           rewardsCurrency: 0,
           penaltyPoint: 0,
@@ -715,6 +831,72 @@ export async function GET(request: NextRequest) {
     );
 
     const analysisData = [...taskRows, ...subtaskRows, ...completionRows, ...subtaskCompletionRows, ...hackathonRows];
+
+    // Sort: pending/new approvals first, then approved ones, both sorted by date
+    analysisData.sort((a: any, b: any) => {
+      // Get approval status
+      const aStatus = a.approvalStatus || "pending";
+      const bStatus = b.approvalStatus || "pending";
+      
+      // Check if approved
+      const aIsApproved = aStatus === "approved";
+      const bIsApproved = bStatus === "approved";
+      
+      // Pending/new approvals come first
+      if (aIsApproved !== bIsApproved) {
+        return aIsApproved ? 1 : -1; // Pending (-1) comes before approved (1)
+      }
+      
+      // Within same group, sort by date (most recent first)
+      // Use tickedAt, completedAt, or createdAt (raw ISO strings) for reliable sorting
+      const getDate = (item: any): Date => {
+        // Prefer raw date fields (ISO strings) for accurate sorting
+        if (item.tickedAt) {
+          const d = new Date(item.tickedAt);
+          if (!isNaN(d.getTime())) return d;
+        }
+        if (item.completedAt) {
+          const d = new Date(item.completedAt);
+          if (!isNaN(d.getTime())) return d;
+        }
+        if (item.createdAt) {
+          const d = new Date(item.createdAt);
+          if (!isNaN(d.getTime())) return d;
+        }
+        // Fallback: Try to parse tickedTime string (format: "MM/DD/YYYY HH:mm" or "MM/DD/YYYY")
+        if (item.tickedTime && typeof item.tickedTime === 'string') {
+          const parts = item.tickedTime.trim().split(' ');
+          if (parts.length >= 1) {
+            const datePart = parts[0].split('/');
+            if (datePart.length === 3) {
+              let date = new Date(
+                parseInt(datePart[2]), // year
+                parseInt(datePart[0]) - 1, // month (0-indexed)
+                parseInt(datePart[1]) // day
+              );
+              // Add time if available
+              if (parts.length >= 2) {
+                const timePart = parts[1].split(':');
+                if (timePart.length >= 2) {
+                  date.setHours(parseInt(timePart[0]), parseInt(timePart[1]), 0, 0);
+                }
+              }
+              if (!isNaN(date.getTime())) {
+                return date;
+              }
+            }
+          }
+        }
+        // Default to epoch if no valid date found
+        return new Date(0);
+      };
+      
+      const aDate = getDate(a);
+      const bDate = getDate(b);
+      
+      // Sort by date descending (most recent first)
+      return bDate.getTime() - aDate.getTime();
+    });
 
     return NextResponse.json({
       success: true,

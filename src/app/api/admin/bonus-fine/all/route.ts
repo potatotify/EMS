@@ -427,19 +427,34 @@ async function calculateEmployeeBonusFine(employeeId: string, period: string, db
     const approvalStatus: string = task.approvalStatus || 'pending';
     let shouldGetPenalty = false;
 
+    // For recurring tasks (daily/weekly/monthly), use today's date for deadlineDate if deadlineTime exists
+    const isRecurring = ["daily", "weekly", "monthly"].includes(task.taskKind);
+    
     if (approvalStatus === 'approved') {
       if (task.status === 'completed') {
         // Check if task was completed after deadline
         let deadlineDate: Date | null = null;
 
-        if (task.deadlineDate) {
-          deadlineDate = new Date(task.deadlineDate);
-          if (task.deadlineTime) {
-            const [h, m] = task.deadlineTime.split(':');
-            deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+        if (task.deadlineTime) {
+          // For recurring tasks, deadlineDate should be the date when task was assigned/completed
+          if (isRecurring && task.assignedDate) {
+            // Use assigned date for recurring tasks
+            deadlineDate = new Date(task.assignedDate);
+            deadlineDate.setHours(0, 0, 0, 0);
+          } else if (task.deadlineDate) {
+            deadlineDate = new Date(task.deadlineDate);
+            deadlineDate.setHours(0, 0, 0, 0);
           } else {
-            deadlineDate.setHours(23, 59, 59, 999);
+            deadlineDate = new Date();
+            deadlineDate.setHours(0, 0, 0, 0);
           }
+          
+          // Parse deadline time
+          const [h, m] = task.deadlineTime.split(':');
+          deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+        } else if (task.deadlineDate) {
+          deadlineDate = new Date(task.deadlineDate);
+          deadlineDate.setHours(23, 59, 59, 999);
         } else if (task.dueDate) {
           deadlineDate = new Date(task.dueDate);
           if (task.dueTime) {
@@ -458,14 +473,27 @@ async function calculateEmployeeBonusFine(employeeId: string, period: string, db
       } else {
         // Not completed but approved - if deadline passed, treat as penalty
         let deadlineDate: Date | null = null;
-        if (task.deadlineDate) {
-          deadlineDate = new Date(task.deadlineDate);
-          if (task.deadlineTime) {
-            const [h, m] = task.deadlineTime.split(':');
-            deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+        if (task.deadlineTime) {
+          // For recurring tasks, use today's date
+          if (isRecurring) {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            deadlineDate = task.deadlineDate ? new Date(task.deadlineDate) : today;
+            deadlineDate.setHours(0, 0, 0, 0);
+          } else if (task.deadlineDate) {
+            deadlineDate = new Date(task.deadlineDate);
+            deadlineDate.setHours(0, 0, 0, 0);
           } else {
-            deadlineDate.setHours(23, 59, 59, 999);
+            deadlineDate = new Date();
+            deadlineDate.setHours(0, 0, 0, 0);
           }
+          
+          // Parse deadline time
+          const [h, m] = task.deadlineTime.split(':');
+          deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+        } else if (task.deadlineDate) {
+          deadlineDate = new Date(task.deadlineDate);
+          deadlineDate.setHours(23, 59, 59, 999);
         } else if (task.dueDate) {
           deadlineDate = new Date(task.dueDate);
           if (task.dueTime) {
@@ -501,14 +529,25 @@ async function calculateEmployeeBonusFine(employeeId: string, period: string, db
         if (penaltyEventDate && penaltyEventDate >= startDate && penaltyEventDate <= nowLocal) {
           // Also verify the deadline was in the period or before
           let deadlineDate: Date | null = null;
-          if (task.deadlineDate) {
-            deadlineDate = new Date(task.deadlineDate);
-            if (task.deadlineTime) {
-              const [h, m] = task.deadlineTime.split(':');
-              deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+          if (task.deadlineTime) {
+            // For recurring tasks, use assigned date
+            if (isRecurring && task.assignedDate) {
+              deadlineDate = new Date(task.assignedDate);
+              deadlineDate.setHours(0, 0, 0, 0);
+            } else if (task.deadlineDate) {
+              deadlineDate = new Date(task.deadlineDate);
+              deadlineDate.setHours(0, 0, 0, 0);
             } else {
-              deadlineDate.setHours(23, 59, 59, 999);
+              deadlineDate = new Date(penaltyEventDate);
+              deadlineDate.setHours(0, 0, 0, 0);
             }
+            
+            // Parse deadline time
+            const [h, m] = task.deadlineTime.split(':');
+            deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+          } else if (task.deadlineDate) {
+            deadlineDate = new Date(task.deadlineDate);
+            deadlineDate.setHours(23, 59, 59, 999);
           } else if (task.dueDate) {
             deadlineDate = new Date(task.dueDate);
             if (task.dueTime) {
@@ -526,14 +565,27 @@ async function calculateEmployeeBonusFine(employeeId: string, period: string, db
       } else {
         // For incomplete tasks with passed deadline, check if deadline passed within the period
         let deadlineDate: Date | null = null;
-        if (task.deadlineDate) {
-          deadlineDate = new Date(task.deadlineDate);
-          if (task.deadlineTime) {
-            const [h, m] = task.deadlineTime.split(':');
-            deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+        if (task.deadlineTime) {
+          // For recurring tasks, use today's date or deadlineDate if set
+          if (isRecurring) {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            deadlineDate = task.deadlineDate ? new Date(task.deadlineDate) : today;
+            deadlineDate.setHours(0, 0, 0, 0);
+          } else if (task.deadlineDate) {
+            deadlineDate = new Date(task.deadlineDate);
+            deadlineDate.setHours(0, 0, 0, 0);
           } else {
-            deadlineDate.setHours(23, 59, 59, 999);
+            deadlineDate = new Date();
+            deadlineDate.setHours(0, 0, 0, 0);
           }
+          
+          // Parse deadline time
+          const [h, m] = task.deadlineTime.split(':');
+          deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+        } else if (task.deadlineDate) {
+          deadlineDate = new Date(task.deadlineDate);
+          deadlineDate.setHours(23, 59, 59, 999);
         } else if (task.dueDate) {
           deadlineDate = new Date(task.dueDate);
           if (task.dueTime) {
@@ -544,7 +596,7 @@ async function calculateEmployeeBonusFine(employeeId: string, period: string, db
           }
         }
         // Include penalty if deadline passed during the period (deadline is within period and has passed)
-        if (deadlineDate && deadlineDate >= startDate && deadlineDate <= nowLocal) {
+        if (deadlineDate && deadlineDate >= startDate && deadlineDate <= nowLocal && nowLocal > deadlineDate) {
           includePenalty = true;
         }
       }

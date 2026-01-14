@@ -1617,6 +1617,13 @@ function TaskItem({
   }, [openMenu]);
 
   const handleSave = () => {
+    // Validate title is present and not empty
+    const titleToSave = (formData.title || "").trim();
+    if (!titleToSave) {
+      alert("Please enter a task title");
+      return;
+    }
+    
     // Ensure assignedDate and assignedTime have defaults if empty
     const now = new Date();
     const defaultDate = now.toISOString().split("T")[0];
@@ -1631,6 +1638,14 @@ function TaskItem({
     
     // Ensure only one employee is assigned - send as array of IDs
     const assignees = assignedToId ? [assignedToId] : [];
+    
+    // For recurring tasks (daily/weekly/monthly), set deadlineDate to today if deadlineTime is set
+    let deadlineDate = formData.deadlineDate;
+    if ((["daily", "weekly", "monthly"].includes(formData.taskKind || "")) && formData.deadlineTime && !deadlineDate) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      deadlineDate = today.toISOString();
+    }
     
     // Filter out custom fields without names (only keep valid fields) and preserve defaultValue
     const validCustomFields = (formData.customFields || [])
@@ -1651,11 +1666,12 @@ function TaskItem({
 
     const dataToSave = {
       ...formData,
+      title: titleToSave, // Ensure title is always present and trimmed
       assignedDate: cleanDateField(formData.assignedDate) || defaultDate,
       assignedTime: formData.assignedTime || defaultTime,
       dueDate: cleanDateField(formData.dueDate),
       dueTime: formData.dueTime || undefined,
-      deadlineDate: cleanDateField(formData.deadlineDate),
+      deadlineDate: cleanDateField(deadlineDate || formData.deadlineDate),
       deadlineTime: formData.deadlineTime || undefined,
       assignedTo: assignedToId, // Send only the ID string
       assignees: assignees, // Only one employee allowed - array of ID strings
@@ -1994,22 +2010,33 @@ function TaskItem({
                   </div>
 
                   {/* Deadline Date/Time */}
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-xs text-neutral-600 mb-1 block">Deadline Date</label>
-                      <input
-                        type="date"
-                        value={formData.deadlineDate ? new Date(formData.deadlineDate).toISOString().split("T")[0] : ""}
-                        onChange={(e) => setFormData({ ...formData, deadlineDate: e.target.value || undefined })}
-                        className="w-full bg-white border border-neutral-300 rounded px-2 py-1 text-xs text-neutral-900 focus:outline-none focus:border-emerald-500"
-                      />
-                    </div>
+                  <div className={`grid gap-2 ${(["daily", "weekly", "monthly"].includes(formData.taskKind || "")) ? "grid-cols-1" : "grid-cols-2"}`}>
+                    {!(["daily", "weekly", "monthly"].includes(formData.taskKind || "")) && (
+                      <div>
+                        <label className="text-xs text-neutral-600 mb-1 block">Deadline Date</label>
+                        <input
+                          type="date"
+                          value={formData.deadlineDate ? new Date(formData.deadlineDate).toISOString().split("T")[0] : ""}
+                          onChange={(e) => setFormData({ ...formData, deadlineDate: e.target.value || undefined })}
+                          className="w-full bg-white border border-neutral-300 rounded px-2 py-1 text-xs text-neutral-900 focus:outline-none focus:border-emerald-500"
+                        />
+                      </div>
+                    )}
                     <div>
                       <label className="text-xs text-neutral-600 mb-1 block">Deadline Time</label>
                       <input
                         type="time"
                         value={formData.deadlineTime || ""}
-                        onChange={(e) => setFormData({ ...formData, deadlineTime: e.target.value || undefined })}
+                        onChange={(e) => {
+                          const updates: any = { ...formData, deadlineTime: e.target.value || undefined };
+                          // For recurring tasks, set deadlineDate to today when deadlineTime is set
+                          if ((["daily", "weekly", "monthly"].includes(formData.taskKind || "")) && e.target.value) {
+                            const today = new Date();
+                            today.setHours(0, 0, 0, 0);
+                            updates.deadlineDate = today.toISOString();
+                          }
+                          setFormData(updates);
+                        }}
                         className="w-full bg-white border border-neutral-300 rounded px-2 py-1 text-xs text-neutral-900 focus:outline-none focus:border-emerald-500"
                       />
                     </div>

@@ -284,6 +284,8 @@ async function saveTaskCompletionHistory(task: any): Promise<void> {
       completedByName: completedByName,
       tickedAt: task.tickedAt || task.completedAt,
       completedAt: task.completedAt,
+      assignedDate: task.assignedDate || task.createdAt || undefined, // Store original assigned date
+      assignedTime: task.assignedTime || undefined, // Store original assigned time
       dueDate: task.dueDate || undefined,
       dueTime: task.dueTime || undefined,
       deadlineDate: task.deadlineDate || undefined,
@@ -388,39 +390,125 @@ export async function resetRecurringTasksForProject(projectId: string): Promise<
     const tasksCollection = db.collection("tasks");
     const subtasksCollection = db.collection("subtasks");
 
-    // Find all completed recurring tasks for this project
+    // Find all recurring tasks for this project (both completed and pending)
     const tasks = await tasksCollection.find({
       projectId: new ObjectId(projectId),
-      status: "completed",
       taskKind: { $in: ["daily", "weekly", "monthly", "recurring", "custom"] }
     }).toArray();
 
     let resetCount = 0;
+    const now = new Date();
 
     for (const task of tasks) {
+      const isCompleted = task.status === "completed";
+      
       // For custom tasks, pass customRecurrence as part of recurringPattern
       const patternToUse = task.taskKind === "custom" && task.customRecurrence
         ? { customRecurrence: task.customRecurrence }
         : task.recurringPattern;
-        
-      const check = shouldResetRecurringTask(
-        task.taskKind as string,
-        task.completedAt || task.tickedAt,
-        patternToUse
-      );
+      
+      // Check if task should be reset (only for completed tasks)
+      let shouldReset = false;
+      if (isCompleted) {
+        const check = shouldResetRecurringTask(
+          task.taskKind as string,
+          task.completedAt || task.tickedAt,
+          patternToUse
+        );
+        shouldReset = check.shouldReset;
+      }
+      
+      // For incomplete recurring tasks, check if deadline has passed and auto-tick
+      if (!isCompleted && task.status === "pending") {
+        // Check if deadline has passed based on deadlineTime
+        let deadlinePassed = false;
+        if (task.deadlineTime) {
+          // For recurring tasks, deadlineDate should be today's date
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          const deadlineDate = task.deadlineDate ? new Date(task.deadlineDate) : today;
+          deadlineDate.setHours(0, 0, 0, 0);
+          
+          // Parse deadline time
+          const [hours, minutes] = task.deadlineTime.split(":");
+          deadlineDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+          
+          // Check if deadline has passed
+          deadlinePassed = now > deadlineDate;
+          
+          // Also check if task should be reset (deadline was yesterday or earlier for daily/weekly/monthly)
+          if (["daily", "weekly", "monthly"].includes(task.taskKind)) {
+            const check = shouldResetRecurringTask(
+              task.taskKind as string,
+              deadlineDate, // Use deadline date as reference
+              patternToUse
+            );
+            if (check.shouldReset && deadlinePassed) {
+              // Auto-tick the task and mark as deadline_passed
+              const assignedTo = task.assignedTo || (task.assignees && task.assignees.length > 0 ? task.assignees[0] : null);
+              
+              // Save as TaskCompletion record before resetting
+              await saveTaskCompletionHistory({
+                ...task,
+                status: "completed",
+                tickedAt: deadlineDate, // Set to deadline time
+                completedAt: deadlineDate,
+                completedBy: assignedTo,
+                approvalStatus: "deadline_passed",
+                approvedAt: now
+              });
+              
+              // Reset the task for next cycle
+              await tasksCollection.updateOne(
+                { _id: task._id },
+                {
+                  $set: {
+                    status: "pending",
+                    approvalStatus: "pending",
+                    // Update deadlineDate to today for recurring tasks
+                    deadlineDate: today
+                  },
+                  $unset: {
+                    completedAt: "",
+                    completedBy: "",
+                    tickedAt: "",
+                    approvedBy: "",
+                    approvedAt: "",
+                    customFieldValues: ""
+                  }
+                }
+              );
+              
+              resetCount++;
+              console.log(`[Task Recurrence] Auto-ticked incomplete recurring task ${task._id} (${task.taskKind}) - deadline passed, marked as deadline_passed`);
+              continue; // Skip to next task
+            }
+          }
+        }
+      }
 
-      if (check.shouldReset) {
+      if (shouldReset) {
         // Save completion history before resetting
         await saveTaskCompletionHistory(task);
+        
+        // For recurring tasks (daily/weekly/monthly), update deadlineDate to today if deadlineTime exists
+        const updateFields: any = {
+          status: "pending",
+          approvalStatus: "pending"
+        };
+        
+        // If task has deadlineTime but is recurring, set deadlineDate to today
+        if (task.deadlineTime && ["daily", "weekly", "monthly"].includes(task.taskKind)) {
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          updateFields.deadlineDate = today;
+        }
         
         // Reset the task
         await tasksCollection.updateOne(
           { _id: task._id },
           {
-            $set: {
-              status: "pending",
-              approvalStatus: "pending"
-            },
+            $set: updateFields,
             $unset: {
               completedAt: "",
               completedBy: "",
@@ -458,7 +546,7 @@ export async function resetRecurringTasksForProject(projectId: string): Promise<
         );
         
         resetCount++;
-        console.log(`[Task Recurrence] Reset task ${task._id} and its subtasks (${task.taskKind}): ${check.message}`);
+        console.log(`[Task Recurrence] Reset task ${task._id} and its subtasks (${task.taskKind})`);
       }
     }
 
@@ -480,42 +568,128 @@ export async function resetRecurringTasksForUser(userId: string): Promise<number
     const subtasksCollection = db.collection("subtasks");
     const userIdObj = new ObjectId(userId);
 
-    // Find all completed recurring tasks assigned to this user
+    // Find all recurring tasks assigned to this user (both completed and pending)
     const tasks = await tasksCollection.find({
       $or: [
         { assignedTo: userIdObj },
         { assignees: userIdObj }
       ],
-      status: "completed",
       taskKind: { $in: ["daily", "weekly", "monthly", "recurring", "custom"] }
     }).toArray();
 
     let resetCount = 0;
+    const now = new Date();
 
     for (const task of tasks) {
+      const isCompleted = task.status === "completed";
+      
       // For custom tasks, pass customRecurrence as part of recurringPattern
       const patternToUse = task.taskKind === "custom" && task.customRecurrence
         ? { customRecurrence: task.customRecurrence }
         : task.recurringPattern;
-        
-      const check = shouldResetRecurringTask(
-        task.taskKind as string,
-        task.completedAt || task.tickedAt,
-        patternToUse
-      );
+      
+      // Check if task should be reset (only for completed tasks)
+      let shouldReset = false;
+      if (isCompleted) {
+        const check = shouldResetRecurringTask(
+          task.taskKind as string,
+          task.completedAt || task.tickedAt,
+          patternToUse
+        );
+        shouldReset = check.shouldReset;
+      }
+      
+      // For incomplete recurring tasks, check if deadline has passed and auto-tick
+      if (!isCompleted && task.status === "pending") {
+        // Check if deadline has passed based on deadlineTime
+        let deadlinePassed = false;
+        if (task.deadlineTime) {
+          // For recurring tasks, deadlineDate should be today's date
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          const deadlineDate = task.deadlineDate ? new Date(task.deadlineDate) : today;
+          deadlineDate.setHours(0, 0, 0, 0);
+          
+          // Parse deadline time
+          const [hours, minutes] = task.deadlineTime.split(":");
+          deadlineDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+          
+          // Check if deadline has passed
+          deadlinePassed = now > deadlineDate;
+          
+          // Also check if task should be reset (deadline was yesterday or earlier for daily/weekly/monthly)
+          if (["daily", "weekly", "monthly"].includes(task.taskKind)) {
+            const check = shouldResetRecurringTask(
+              task.taskKind as string,
+              deadlineDate, // Use deadline date as reference
+              patternToUse
+            );
+            if (check.shouldReset && deadlinePassed) {
+              // Auto-tick the task and mark as deadline_passed
+              const assignedTo = task.assignedTo || (task.assignees && task.assignees.length > 0 ? task.assignees[0] : null);
+              
+              // Save as TaskCompletion record before resetting
+              await saveTaskCompletionHistory({
+                ...task,
+                status: "completed",
+                tickedAt: deadlineDate, // Set to deadline time
+                completedAt: deadlineDate,
+                completedBy: assignedTo,
+                approvalStatus: "deadline_passed",
+                approvedAt: now
+              });
+              
+              // Reset the task for next cycle
+              await tasksCollection.updateOne(
+                { _id: task._id },
+                {
+                  $set: {
+                    status: "pending",
+                    approvalStatus: "pending",
+                    // Update deadlineDate to today for recurring tasks
+                    deadlineDate: today
+                  },
+                  $unset: {
+                    completedAt: "",
+                    completedBy: "",
+                    tickedAt: "",
+                    approvedBy: "",
+                    approvedAt: "",
+                    customFieldValues: ""
+                  }
+                }
+              );
+              
+              resetCount++;
+              console.log(`[Task Recurrence] Auto-ticked incomplete recurring task ${task._id} (${task.taskKind}) - deadline passed, marked as deadline_passed`);
+              continue; // Skip to next task
+            }
+          }
+        }
+      }
 
-      if (check.shouldReset) {
+      if (shouldReset) {
         // Save completion history before resetting
         await saveTaskCompletionHistory(task);
+        
+        // For recurring tasks (daily/weekly/monthly), update deadlineDate to today if deadlineTime exists
+        const updateFields: any = {
+          status: "pending",
+          approvalStatus: "pending"
+        };
+        
+        // If task has deadlineTime but is recurring, set deadlineDate to today
+        if (task.deadlineTime && ["daily", "weekly", "monthly"].includes(task.taskKind)) {
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          updateFields.deadlineDate = today;
+        }
         
         // Reset the task
         await tasksCollection.updateOne(
           { _id: task._id },
           {
-            $set: {
-              status: "pending",
-              approvalStatus: "pending"
-            },
+            $set: updateFields,
             $unset: {
               completedAt: "",
               completedBy: "",
@@ -553,7 +727,7 @@ export async function resetRecurringTasksForUser(userId: string): Promise<number
         );
         
         resetCount++;
-        console.log(`[Task Recurrence] Reset task ${task._id} and its subtasks (${task.taskKind}): ${check.message}`);
+        console.log(`[Task Recurrence] Reset task ${task._id} and its subtasks (${task.taskKind})`);
       }
     }
 
@@ -644,7 +818,7 @@ export async function resetAllRecurringTasks(): Promise<number> {
         );
         
         resetCount++;
-        console.log(`[Task Recurrence] Reset task ${task._id} and its subtasks (${task.taskKind}): ${check.message}`);
+        console.log(`[Task Recurrence] Reset task ${task._id} and its subtasks (${task.taskKind})`);
       }
     }
 
