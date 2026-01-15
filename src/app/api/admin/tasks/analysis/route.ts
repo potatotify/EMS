@@ -170,13 +170,27 @@ export async function GET(request: NextRequest) {
         const formatDate = (date: Date | string | undefined) => {
           if (!date) return "";
           const d = typeof date === "string" ? new Date(date) : date;
-          return d.toLocaleDateString("en-US", { year: "numeric", month: "2-digit", day: "2-digit" });
+          // Convert to IST (Asia/Kolkata) timezone - UTC+5:30
+          const formatter = new Intl.DateTimeFormat("en-US", {
+            timeZone: "Asia/Kolkata",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+          });
+          return formatter.format(d);
         };
 
         const formatTime = (date: Date | string | undefined) => {
           if (!date) return "";
           const d = typeof date === "string" ? new Date(date) : date;
-          return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
+          // Convert to IST (Asia/Kolkata) timezone - UTC+5:30
+          const formatter = new Intl.DateTimeFormat("en-US", {
+            timeZone: "Asia/Kolkata",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+          });
+          return formatter.format(d);
         };
 
         // Check if deadline has passed and auto-reject if needed
@@ -325,11 +339,27 @@ export async function GET(request: NextRequest) {
           } else {
             employeeGot = "Not Completed";
           }
-        } else if (approvalStatus === "rejected" || approvalStatus === "deadline_passed") {
-          // If admin rejects or deadline passed, employee should get penalty (if configured), otherwise 0
+        } else if (approvalStatus === "rejected") {
+          // If admin rejects, employee should get penalty (if configured), otherwise 0
           if (task.penaltyPoints && task.penaltyPoints > 0) {
             employeeGot = `-${task.penaltyPoints} Penalty`;
           } else {
+            employeeGot = "0 Points";
+          }
+        } else if (approvalStatus === "deadline_passed") {
+          // Deadline passed: fines are automatically applied, so show penalty points
+          // The penalty points should be displayed regardless of approval status
+          // since fines are automatically applied when deadline passes
+          if (task.penaltyPoints !== null && task.penaltyPoints !== undefined) {
+            if (task.penaltyPoints > 0) {
+              employeeGot = `-${task.penaltyPoints} Penalty`;
+            } else {
+              // Even if penaltyPoints is 0, show it since deadline passed
+              employeeGot = "0 Points";
+            }
+          } else {
+            // If penaltyPoints is not explicitly set, check if there's a penalty configured
+            // Default to showing "0 Points" if no penalty is configured
             employeeGot = "0 Points";
           }
         } else {
@@ -356,6 +386,8 @@ export async function GET(request: NextRequest) {
 
         // Get ticked/completed date for sorting
         const tickedAtDate = task.tickedAt || task.completedAt || task.createdAt;
+        // Get assigned date for sorting (prefer assignedDate, fallback to createdAt)
+        const assignedDateRaw = task.assignedDate || task.createdAt;
         
         return {
           _id: task._id.toString(),
@@ -383,6 +415,7 @@ export async function GET(request: NextRequest) {
             return "";
           })(),
           // Add raw date fields for sorting
+          assignedAtDateISO: assignedDateRaw ? new Date(assignedDateRaw).toISOString() : null,
           tickedAt: tickedAtDate ? new Date(tickedAtDate).toISOString() : null,
           completedAt: task.completedAt ? new Date(task.completedAt).toISOString() : null,
           createdAt: task.createdAt ? new Date(task.createdAt).toISOString() : null,
@@ -463,13 +496,27 @@ export async function GET(request: NextRequest) {
         const formatDate = (date: Date | string | undefined) => {
           if (!date) return '';
           const d = typeof date === 'string' ? new Date(date) : date;
-          return d.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' });
+          // Convert to IST (Asia/Kolkata) timezone - UTC+5:30
+          const formatter = new Intl.DateTimeFormat("en-US", {
+            timeZone: "Asia/Kolkata",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+          });
+          return formatter.format(d);
         };
 
         const formatTime = (date: Date | string | undefined) => {
           if (!date) return '';
           const d = typeof date === 'string' ? new Date(date) : date;
-          return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+          // Convert to IST (Asia/Kolkata) timezone - UTC+5:30
+          const formatter = new Intl.DateTimeFormat("en-US", {
+            timeZone: "Asia/Kolkata",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+          });
+          return formatter.format(d);
         };
 
         return {
@@ -497,6 +544,7 @@ export async function GET(request: NextRequest) {
             return '';
           })(),
           // Add raw date fields for sorting
+          assignedAtDateISO: subtask.createdAt ? new Date(subtask.createdAt).toISOString() : null,
           tickedAt: subtask.tickedAt ? new Date(subtask.tickedAt).toISOString() : (subtask.completedAt ? new Date(subtask.completedAt).toISOString() : null),
           completedAt: subtask.completedAt ? new Date(subtask.completedAt).toISOString() : null,
           createdAt: subtask.createdAt ? new Date(subtask.createdAt).toISOString() : null,
@@ -553,21 +601,27 @@ export async function GET(request: NextRequest) {
         const formatDate = (date: Date | string | undefined | null) => {
           if (!date) return "";
           const d = typeof date === "string" ? new Date(date) : date;
-          return d.toLocaleDateString("en-US", {
+          // Convert to IST (Asia/Kolkata) timezone - UTC+5:30
+          const formatter = new Intl.DateTimeFormat("en-US", {
+            timeZone: "Asia/Kolkata",
             year: "numeric",
             month: "2-digit",
             day: "2-digit",
           });
+          return formatter.format(d);
         };
 
         const formatTime = (date: Date | string | undefined | null) => {
           if (!date) return "";
           const d = typeof date === "string" ? new Date(date) : date;
-          return d.toLocaleTimeString("en-US", {
+          // Convert to IST (Asia/Kolkata) timezone - UTC+5:30
+          const formatter = new Intl.DateTimeFormat("en-US", {
+            timeZone: "Asia/Kolkata",
             hour: "2-digit",
             minute: "2-digit",
             hour12: false,
           });
+          return formatter.format(d);
         };
 
         const submittedAt = p.submission?.submittedAt || p.createdAt;
@@ -601,6 +655,11 @@ export async function GET(request: NextRequest) {
           priority: 2,
           tickedBy: user?.name || "",
           tickedTime: submittedAt ? `${formatDate(submittedAt)} ${formatTime(submittedAt)}` : "",
+          // Add raw date fields for sorting
+          assignedAtDateISO: startDate ? new Date(startDate).toISOString() : (p.createdAt ? new Date(p.createdAt).toISOString() : null),
+          tickedAt: submittedAt ? new Date(submittedAt).toISOString() : null,
+          completedAt: null,
+          createdAt: p.createdAt ? new Date(p.createdAt).toISOString() : null,
           // Use hackathon prize pool as reward points
           rewardsPoint: hackathon?.prizePool || 0,
           // No fine points for hackathon entries
@@ -630,26 +689,34 @@ export async function GET(request: NextRequest) {
         const formatDate = (date: Date | string | undefined | null) => {
           if (!date) return "";
           const d = typeof date === "string" ? new Date(date) : date;
-          return d.toLocaleDateString("en-US", {
+          // Convert to IST (Asia/Kolkata) timezone - UTC+5:30
+          const formatter = new Intl.DateTimeFormat("en-US", {
+            timeZone: "Asia/Kolkata",
             year: "numeric",
             month: "2-digit",
             day: "2-digit",
           });
+          return formatter.format(d);
         };
 
         const formatTime = (date: Date | string | undefined | null) => {
           if (!date) return "";
           const d = typeof date === "string" ? new Date(date) : date;
-          return d.toLocaleTimeString("en-US", {
+          // Convert to IST (Asia/Kolkata) timezone - UTC+5:30
+          const formatter = new Intl.DateTimeFormat("en-US", {
+            timeZone: "Asia/Kolkata",
             hour: "2-digit",
             minute: "2-digit",
             hour12: false,
           });
+          return formatter.format(d);
         };
 
         // Calculate what employee got
         let employeeGot = "";
-        if (completion.approvalStatus === "approved") {
+        const completionApprovalStatus = completion.approvalStatus || "pending";
+        
+        if (completionApprovalStatus === "approved") {
           if (completion.actualPoints !== undefined) {
             if (completion.actualPoints > 0) {
               employeeGot = `+${completion.actualPoints} Points`;
@@ -660,6 +727,27 @@ export async function GET(request: NextRequest) {
             employeeGot = `+${completion.bonusPoints} Points`;
           } else if (completion.penaltyPoints && completion.penaltyPoints > 0) {
             employeeGot = `-${completion.penaltyPoints} Points`;
+          }
+        } else if (completionApprovalStatus === "deadline_passed") {
+          // Deadline passed: fines are automatically applied, so show penalty points
+          // The penalty points should be displayed regardless of approval status
+          if (completion.penaltyPoints !== null && completion.penaltyPoints !== undefined) {
+            if (completion.penaltyPoints > 0) {
+              employeeGot = `-${completion.penaltyPoints} Penalty`;
+            } else {
+              // Even if penaltyPoints is 0, show it since deadline passed
+              employeeGot = "0 Points";
+            }
+          } else {
+            // If penaltyPoints is not explicitly set, default to showing "0 Points"
+            employeeGot = "0 Points";
+          }
+        } else if (completionApprovalStatus === "rejected") {
+          // If admin rejects, employee should get penalty (if configured), otherwise 0
+          if (completion.penaltyPoints && completion.penaltyPoints > 0) {
+            employeeGot = `-${completion.penaltyPoints} Penalty`;
+          } else {
+            employeeGot = "0 Points";
           }
         }
 
@@ -684,11 +772,13 @@ export async function GET(request: NextRequest) {
         // Get assigned date/time - prefer stored assignedDate/assignedTime, then try original task, then tickedAt
         let assignedAtDate = "";
         let assignedAtTime = "";
+        let assignedAtDateISO: string | null = null;
         
         // First check if assignedDate/assignedTime are stored in completion record
         if (completion.assignedDate) {
           assignedAtDate = formatDate(completion.assignedDate);
           assignedAtTime = completion.assignedTime || formatTime(completion.assignedDate);
+          assignedAtDateISO = new Date(completion.assignedDate).toISOString();
         } else {
           // Try to get original task's assignedDate/assignedTime if task still exists
           try {
@@ -702,9 +792,11 @@ export async function GET(request: NextRequest) {
                 if (originalTask.assignedDate) {
                   assignedAtDate = formatDate(originalTask.assignedDate);
                   assignedAtTime = originalTask.assignedTime || formatTime(originalTask.assignedDate);
+                  assignedAtDateISO = new Date(originalTask.assignedDate).toISOString();
                 } else if (originalTask.createdAt) {
                   assignedAtDate = formatDate(originalTask.createdAt);
                   assignedAtTime = formatTime(originalTask.createdAt);
+                  assignedAtDateISO = new Date(originalTask.createdAt).toISOString();
                 }
               }
             }
@@ -716,10 +808,12 @@ export async function GET(request: NextRequest) {
           if (!assignedAtDate && completion.tickedAt) {
             assignedAtDate = formatDate(completion.tickedAt);
             assignedAtTime = formatTime(completion.tickedAt);
+            assignedAtDateISO = new Date(completion.tickedAt).toISOString();
           } else if (!assignedAtDate && completion.createdAt) {
             // Last fallback: use completion record creation date
             assignedAtDate = formatDate(completion.createdAt);
             assignedAtTime = formatTime(completion.createdAt);
+            assignedAtDateISO = new Date(completion.createdAt).toISOString();
           }
         }
 
@@ -742,6 +836,7 @@ export async function GET(request: NextRequest) {
           tickedBy: completion.completedByName || "",
           tickedTime: completion.tickedAt ? `${formatDate(completion.tickedAt)} ${formatTime(completion.tickedAt)}` : "",
           // Add raw date fields for sorting
+          assignedAtDateISO: assignedAtDateISO,
           tickedAt: completion.tickedAt ? new Date(completion.tickedAt).toISOString() : null,
           completedAt: completion.completedAt ? new Date(completion.completedAt).toISOString() : null,
           createdAt: completion.createdAt ? new Date(completion.createdAt).toISOString() : null,
@@ -776,6 +871,7 @@ export async function GET(request: NextRequest) {
             year: 'numeric',
             month: '2-digit',
             day: '2-digit',
+            timeZone: 'Asia/Kolkata'
           });
         };
 
@@ -786,6 +882,7 @@ export async function GET(request: NextRequest) {
             hour: '2-digit',
             minute: '2-digit',
             hour12: false,
+            timeZone: 'Asia/Kolkata'
           });
         };
 
@@ -808,6 +905,7 @@ export async function GET(request: NextRequest) {
           tickedBy: completion.completedByName || '',
           tickedTime: completion.tickedAt ? `${formatDate(completion.tickedAt)} ${formatTime(completion.tickedAt)}` : '',
           // Add raw date fields for sorting
+          assignedAtDateISO: completion.createdAt ? new Date(completion.createdAt).toISOString() : null,
           tickedAt: completion.tickedAt ? new Date(completion.tickedAt).toISOString() : null,
           completedAt: completion.completedAt ? new Date(completion.completedAt).toISOString() : null,
           createdAt: completion.createdAt ? new Date(completion.createdAt).toISOString() : null,
@@ -832,7 +930,7 @@ export async function GET(request: NextRequest) {
 
     const analysisData = [...taskRows, ...subtaskRows, ...completionRows, ...subtaskCompletionRows, ...hackathonRows];
 
-    // Sort: pending/new approvals first, then approved ones, both sorted by date
+    // Sort: pending/new approvals first, then approved ones, both sorted by assigned date (newest first, oldest last)
     analysisData.sort((a: any, b: any) => {
       // Get approval status
       const aStatus = a.approvalStatus || "pending";
@@ -847,10 +945,29 @@ export async function GET(request: NextRequest) {
         return aIsApproved ? 1 : -1; // Pending (-1) comes before approved (1)
       }
       
-      // Within same group, sort by date (most recent first)
-      // Use tickedAt, completedAt, or createdAt (raw ISO strings) for reliable sorting
-      const getDate = (item: any): Date => {
-        // Prefer raw date fields (ISO strings) for accurate sorting
+      // Within same group, sort by assigned date (newest first, oldest last)
+      // Use assignedAtDateISO (raw ISO strings) for reliable sorting
+      const getAssignedDate = (item: any): Date => {
+        // Prefer assignedAtDateISO for accurate sorting by assigned date
+        if (item.assignedAtDateISO) {
+          const d = new Date(item.assignedAtDateISO);
+          if (!isNaN(d.getTime())) return d;
+        }
+        // Fallback: Try to parse assignedAtDate string (format: "MM/DD/YYYY")
+        if (item.assignedAtDate && typeof item.assignedAtDate === 'string') {
+          const datePart = item.assignedAtDate.split('/');
+          if (datePart.length === 3) {
+            const date = new Date(
+              parseInt(datePart[2]), // year
+              parseInt(datePart[0]) - 1, // month (0-indexed)
+              parseInt(datePart[1]) // day
+            );
+            if (!isNaN(date.getTime())) {
+              return date;
+            }
+          }
+        }
+        // Fallback to tickedAt, completedAt, or createdAt if assignedAtDate not available
         if (item.tickedAt) {
           const d = new Date(item.tickedAt);
           if (!isNaN(d.getTime())) return d;
@@ -863,38 +980,14 @@ export async function GET(request: NextRequest) {
           const d = new Date(item.createdAt);
           if (!isNaN(d.getTime())) return d;
         }
-        // Fallback: Try to parse tickedTime string (format: "MM/DD/YYYY HH:mm" or "MM/DD/YYYY")
-        if (item.tickedTime && typeof item.tickedTime === 'string') {
-          const parts = item.tickedTime.trim().split(' ');
-          if (parts.length >= 1) {
-            const datePart = parts[0].split('/');
-            if (datePart.length === 3) {
-              let date = new Date(
-                parseInt(datePart[2]), // year
-                parseInt(datePart[0]) - 1, // month (0-indexed)
-                parseInt(datePart[1]) // day
-              );
-              // Add time if available
-              if (parts.length >= 2) {
-                const timePart = parts[1].split(':');
-                if (timePart.length >= 2) {
-                  date.setHours(parseInt(timePart[0]), parseInt(timePart[1]), 0, 0);
-                }
-              }
-              if (!isNaN(date.getTime())) {
-                return date;
-              }
-            }
-          }
-        }
         // Default to epoch if no valid date found
         return new Date(0);
       };
       
-      const aDate = getDate(a);
-      const bDate = getDate(b);
+      const aDate = getAssignedDate(a);
+      const bDate = getAssignedDate(b);
       
-      // Sort by date descending (most recent first)
+      // Sort by assigned date descending (newest first, oldest last)
       return bDate.getTime() - aDate.getTime();
     });
 

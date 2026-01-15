@@ -113,6 +113,7 @@ export default function AdminDashboard() {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [viewProjectId, setViewProjectId] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<SectionType>("projects");
+  const [isInitialized, setIsInitialized] = useState(false);
   
   // Sidebar collapse state with localStorage persistence
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
@@ -132,6 +133,32 @@ export default function AdminDashboard() {
   const toggleSidebar = () => {
     setIsSidebarCollapsed(!isSidebarCollapsed);
   };
+
+  // Initialize activeSection from URL query parameter on mount
+  useEffect(() => {
+    if (typeof window !== "undefined" && !isInitialized) {
+      const params = new URLSearchParams(window.location.search);
+      const section = params.get("section") as SectionType | null;
+      if (section && ["projects", "project-daily-updates", "daily-updates", "employee-daily-updates", "pending-approvals", "employees", "employee-report", "hackathons", "messages", "checklist-settings", "employee-permissions", "project-tasks", "task-analysis", "bonus-summary", "clients", "employee-projects", "fine-control"].includes(section)) {
+        setActiveSection(section);
+      }
+      setIsInitialized(true);
+    }
+  }, [isInitialized]);
+
+  // Update URL when activeSection changes (but not on initial mount)
+  useEffect(() => {
+    if (typeof window !== "undefined" && isInitialized) {
+      const params = new URLSearchParams(window.location.search);
+      if (activeSection !== "projects") {
+        params.set("section", activeSection);
+      } else {
+        params.delete("section");
+      }
+      const newUrl = params.toString() ? `${window.location.pathname}?${params.toString()}` : window.location.pathname;
+      window.history.replaceState({}, "", newUrl);
+    }
+  }, [activeSection, isInitialized]);
 
   useEffect(() => {
     if (status === "authenticated") {

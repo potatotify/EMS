@@ -58,6 +58,7 @@ export default function EmployeeDashboard() {
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
   const [activeSection, setActiveSection] = useState<SectionType>("projects");
+  const [isInitialized, setIsInitialized] = useState(false);
   
   // Sidebar collapse state with localStorage persistence
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
@@ -77,6 +78,32 @@ export default function EmployeeDashboard() {
   const toggleSidebar = () => {
     setIsSidebarCollapsed(!isSidebarCollapsed);
   };
+
+  // Initialize activeSection from URL query parameter on mount
+  useEffect(() => {
+    if (typeof window !== "undefined" && !isInitialized) {
+      const params = new URLSearchParams(window.location.search);
+      const section = params.get("section") as SectionType | null;
+      if (section && ["projects", "all-tasks", "bonus-fine", "permissions"].includes(section)) {
+        setActiveSection(section);
+      }
+      setIsInitialized(true);
+    }
+  }, [isInitialized]);
+
+  // Update URL when activeSection changes (but not on initial mount)
+  useEffect(() => {
+    if (typeof window !== "undefined" && isInitialized) {
+      const params = new URLSearchParams(window.location.search);
+      if (activeSection !== "projects") {
+        params.set("section", activeSection);
+      } else {
+        params.delete("section");
+      }
+      const newUrl = params.toString() ? `${window.location.pathname}?${params.toString()}` : window.location.pathname;
+      window.history.replaceState({}, "", newUrl);
+    }
+  }, [activeSection, isInitialized]);
 
   useEffect(() => {
     if (status === "authenticated") {

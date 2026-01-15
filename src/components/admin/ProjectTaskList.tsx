@@ -494,6 +494,25 @@ export default function ProjectTaskList() {
     }
   };
 
+  // Helper function to update a task in the tasks state
+  const updateTaskInState = (taskId: string, updates: Partial<Task>) => {
+    setTasks((prevTasks) => {
+      const newTasks = { ...prevTasks };
+      for (const sectionName in newTasks) {
+        const taskIndex = newTasks[sectionName].findIndex((t) => t._id === taskId);
+        if (taskIndex !== -1) {
+          newTasks[sectionName] = [...newTasks[sectionName]];
+          newTasks[sectionName][taskIndex] = {
+            ...newTasks[sectionName][taskIndex],
+            ...updates,
+          };
+          return newTasks;
+        }
+      }
+      return prevTasks;
+    });
+  };
+
   const handleToggleTaskStatus = async (task: Task) => {
     // If marking as complete, check if all subtasks are completed
     if (task.status !== 'completed') {
@@ -504,7 +523,12 @@ export default function ProjectTaskList() {
     }
 
     const newStatus: TaskStatus = task.status === 'completed' ? 'pending' : 'completed';
+    const previousStatus = task.status; // Store previous status for rollback
     
+    // OPTIMISTIC UPDATE: Update UI immediately BEFORE any API call
+    updateTaskInState(task._id, { status: newStatus });
+    
+    // Make API call in the background
     try {
       const response = await fetch(`/api/admin/tasks/${task._id}`, {
         method: 'PATCH',
@@ -514,9 +538,18 @@ export default function ProjectTaskList() {
 
       if (response.ok) {
         await fetchTasks(selectedProjectId!);
+      } else {
+        // API call failed - rollback the optimistic update
+        updateTaskInState(task._id, { status: previousStatus });
+        const errorData = await response.json().catch(() => ({}));
+        console.error('Error toggling task status:', errorData);
+        alert(errorData.error || 'Failed to update task. Please try again.');
       }
     } catch (error) {
+      // Network error or other exception - rollback the optimistic update
+      updateTaskInState(task._id, { status: previousStatus });
       console.error('Error toggling task status:', error);
+      alert('Failed to update task. Please try again.');
     }
   };
 

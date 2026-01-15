@@ -374,6 +374,25 @@ function EmployeeProjectTasksContent() {
     }
   }, [showDisplayMenu]);
 
+  // Helper function to update a task in the tasks state
+  const updateTaskInState = (taskId: string, updates: Partial<Task>) => {
+    setTasks((prevTasks) => {
+      const newTasks = { ...prevTasks };
+      for (const sectionName in newTasks) {
+        const taskIndex = newTasks[sectionName].findIndex((t) => t._id === taskId);
+        if (taskIndex !== -1) {
+          newTasks[sectionName] = [...newTasks[sectionName]];
+          newTasks[sectionName][taskIndex] = {
+            ...newTasks[sectionName][taskIndex],
+            ...updates,
+          };
+          return newTasks;
+        }
+      }
+      return prevTasks;
+    });
+  };
+
   const handleToggleComplete = async (task: Task) => {
     // Only allow ticking if task is assigned to the employee
     if (task.canTick === false) {
@@ -429,78 +448,93 @@ function EmployeeProjectTasksContent() {
     }
 
     const newStatus = task.status === "completed" ? "pending" : "completed";
+    const previousStatus = task.status; // Store previous status for rollback
     
-    // If completing the task, ask for time spent (only if task is assigned to user)
-    let timeSpent: number | undefined;
-    if (newStatus === "completed" && isAssigned) {
-      const timeInput = prompt("How many hours did you spend on this task?");
-      if (timeInput === null) {
-        return; // User cancelled
-      }
-      const parsedTime = parseFloat(timeInput);
-      if (isNaN(parsedTime) || parsedTime < 0) {
-        alert("Please enter a valid number of hours (e.g., 2.5 for 2 hours 30 minutes)");
-        return;
-      }
-      timeSpent = parsedTime;
-    }
+    // OPTIMISTIC UPDATE: Update UI immediately BEFORE any blocking operations
+    updateTaskInState(task._id, { status: newStatus });
     
-    try {
-      const requestBody: any = { status: newStatus };
-      if (timeSpent !== undefined) {
-        requestBody.timeSpent = timeSpent;
+    // Use setTimeout to defer prompt, allowing React to render the UI update first
+    setTimeout(async () => {
+      // If completing the task, ask for time spent (only if task is assigned to user)
+      let timeSpent: number | undefined;
+      if (newStatus === "completed" && isAssigned) {
+        const timeInput = prompt("How many hours did you spend on this task?");
+        if (timeInput === null) {
+          // User cancelled - rollback the optimistic update
+          updateTaskInState(task._id, { status: previousStatus });
+          return;
+        }
+        const parsedTime = parseFloat(timeInput);
+        if (isNaN(parsedTime) || parsedTime < 0) {
+          alert("Please enter a valid number of hours (e.g., 2.5 for 2 hours 30 minutes)");
+          // Rollback the optimistic update
+          updateTaskInState(task._id, { status: previousStatus });
+          return;
+        }
+        timeSpent = parsedTime;
       }
       
-      console.log(`[Toggle Complete] Updating task ${task._id} with status: ${newStatus}`, requestBody);
-      
-      const response = await fetch(`/api/employee/tasks/${task._id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestBody),
-      });
+      try {
+        const requestBody: any = { status: newStatus };
+        if (timeSpent !== undefined) {
+          requestBody.timeSpent = timeSpent;
+        }
+        
+        console.log(`[Toggle Complete] Updating task ${task._id} with status: ${newStatus}`, requestBody);
+        
+        const response = await fetch(`/api/employee/tasks/${task._id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+        });
 
-      console.log(`[Toggle Complete] Response status: ${response.status}, ok: ${response.ok}`);
+        console.log(`[Toggle Complete] Response status: ${response.status}, ok: ${response.ok}`);
 
-      if (response.ok) {
-        await fetchTasks(projectId!);
-      } else {
-        let errorMessage = "Failed to update task";
-        try {
-          const contentType = response.headers.get("content-type");
-          console.log(`[Toggle Complete] Response content-type: ${contentType}`);
-          
-          if (contentType && contentType.includes("application/json")) {
-            const text = await response.text();
-            console.log(`[Toggle Complete] Response text:`, text);
+        if (response.ok) {
+          await fetchTasks(projectId!);
+        } else {
+          // API call failed - rollback the optimistic update
+          updateTaskInState(task._id, { status: previousStatus });
+          let errorMessage = "Failed to update task";
+          try {
+            const contentType = response.headers.get("content-type");
+            console.log(`[Toggle Complete] Response content-type: ${contentType}`);
             
-            if (text && text.trim()) {
-              try {
-                const errorData = JSON.parse(text);
-                errorMessage = errorData.error || errorData.message || errorMessage;
-                console.error("Error updating task:", errorData);
-              } catch (jsonError) {
-                console.error("Error parsing JSON:", jsonError);
-                errorMessage = text || `Failed to update task (Status: ${response.status})`;
+            if (contentType && contentType.includes("application/json")) {
+              const text = await response.text();
+              console.log(`[Toggle Complete] Response text:`, text);
+              
+              if (text && text.trim()) {
+                try {
+                  const errorData = JSON.parse(text);
+                  errorMessage = errorData.error || errorData.message || errorMessage;
+                  console.error("Error updating task:", errorData);
+                } catch (jsonError) {
+                  console.error("Error parsing JSON:", jsonError);
+                  errorMessage = text || `Failed to update task (Status: ${response.status})`;
+                }
+              } else {
+                errorMessage = `Failed to update task (Status: ${response.status})`;
               }
             } else {
-              errorMessage = `Failed to update task (Status: ${response.status})`;
+              const text = await response.text();
+              errorMessage = text || `Failed to update task (Status: ${response.status})`;
+              console.error("Error updating task - non-JSON response:", text);
             }
-          } else {
-            const text = await response.text();
-            errorMessage = text || `Failed to update task (Status: ${response.status})`;
-            console.error("Error updating task - non-JSON response:", text);
+          } catch (parseError) {
+            console.error("Error parsing error response:", parseError);
+            errorMessage = `Failed to update task (Status: ${response.status})`;
           }
-        } catch (parseError) {
-          console.error("Error parsing error response:", parseError);
-          errorMessage = `Failed to update task (Status: ${response.status})`;
+          alert(errorMessage);
         }
-        alert(errorMessage);
+      } catch (error) {
+        // Network error or other exception - rollback the optimistic update
+        updateTaskInState(task._id, { status: previousStatus });
+        console.error("Error updating task:", error);
+        const errorMsg = error instanceof Error ? error.message : "Unknown error";
+        alert(`Failed to update task: ${errorMsg}. Please try again.`);
       }
-    } catch (error) {
-      console.error("Error updating task:", error);
-      const errorMsg = error instanceof Error ? error.message : "Unknown error";
-      alert(`Failed to update task: ${errorMsg}. Please try again.`);
-    }
+    }, 0);
   };
 
   const handleToggleNotApplicable = async (task: Task) => {

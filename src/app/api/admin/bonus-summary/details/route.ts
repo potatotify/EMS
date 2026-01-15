@@ -46,8 +46,27 @@ export async function GET(request: NextRequest) {
     const todayEnd = new Date(today);
     todayEnd.setHours(23, 59, 59, 999);
 
-    const startDate = startDateParam ? new Date(startDateParam) : today;
-    const endDate = endDateParam ? new Date(endDateParam) : todayEnd;
+    // Parse date parameters and ensure proper time boundaries
+    let startDate: Date;
+    let endDate: Date;
+    
+    if (startDateParam) {
+      // Parse the date string and set to start of day (local time)
+      const parsedStart = new Date(startDateParam);
+      startDate = new Date(parsedStart.getFullYear(), parsedStart.getMonth(), parsedStart.getDate());
+      startDate.setHours(0, 0, 0, 0);
+    } else {
+      startDate = today;
+    }
+    
+    if (endDateParam) {
+      // Parse the date string and set to end of day (local time)
+      const parsedEnd = new Date(endDateParam);
+      endDate = new Date(parsedEnd.getFullYear(), parsedEnd.getMonth(), parsedEnd.getDate());
+      endDate.setHours(23, 59, 59, 999);
+    } else {
+      endDate = todayEnd;
+    }
 
     console.log('=== BONUS DETAILS DEBUG ===');
     console.log('Employee ID:', employeeId.toString());
@@ -159,9 +178,19 @@ export async function GET(request: NextRequest) {
             const completedDate = new Date(completedAt);
             const deadlineDateObj = deadlineDate;
             
+            // Normalize dates for comparison
+            const completedDateNormalized = new Date(completedDate);
+            completedDateNormalized.setHours(0, 0, 0, 0);
+            const deadlineDateNormalized = new Date(deadlineDateObj);
+            deadlineDateNormalized.setHours(0, 0, 0, 0);
+            const startDateNormalized = new Date(startDate);
+            startDateNormalized.setHours(0, 0, 0, 0);
+            const endDateNormalized = new Date(endDate);
+            endDateNormalized.setHours(23, 59, 59, 999);
+            
             // Include if completion happened in period OR deadline was in period
-            if ((completedDate >= startDate && completedDate <= endDate) ||
-                (deadlineDateObj >= startDate && deadlineDateObj <= endDate)) {
+            if ((completedDateNormalized >= startDateNormalized && completedDateNormalized <= endDateNormalized) ||
+                (deadlineDateNormalized >= startDateNormalized && deadlineDateNormalized <= endDateNormalized)) {
               penaltyEventInPeriod = true;
             }
           } else if (bonus > 0 || bonusCurrency > 0) {
@@ -169,7 +198,12 @@ export async function GET(request: NextRequest) {
             // Reward event is when task was completed on time
             baseDate = completedAt;
             const completedDate = new Date(completedAt);
-            if (completedDate >= startDate && completedDate <= endDate) {
+            completedDate.setHours(0, 0, 0, 0);
+            const startDateNormalized = new Date(startDate);
+            startDateNormalized.setHours(0, 0, 0, 0);
+            const endDateNormalized = new Date(endDate);
+            endDateNormalized.setHours(23, 59, 59, 999);
+            if (completedDate >= startDateNormalized && completedDate <= endDateNormalized) {
               rewardEventInPeriod = true;
             }
           }
@@ -215,7 +249,15 @@ export async function GET(request: NextRequest) {
             shouldGetPenalty = true;
             // Penalty event is when deadline passed
             baseDate = deadlineDate;
-            if (deadlineDate >= startDate && deadlineDate <= endDate) {
+            // Normalize dates for comparison
+            const deadlineDateNormalized = new Date(deadlineDate);
+            deadlineDateNormalized.setHours(0, 0, 0, 0);
+            const startDateNormalized = new Date(startDate);
+            startDateNormalized.setHours(0, 0, 0, 0);
+            const endDateNormalized = new Date(endDate);
+            endDateNormalized.setHours(23, 59, 59, 999);
+            
+            if (deadlineDateNormalized >= startDateNormalized && deadlineDateNormalized <= endDateNormalized) {
               penaltyEventInPeriod = true;
             }
           }
@@ -231,12 +273,86 @@ export async function GET(request: NextRequest) {
       ) {
         if (penalty > 0 || penaltyCurrency > 0) {
           shouldGetPenalty = true;
-          // Penalty event is when task was rejected or deadline passed
-          baseDate = task.approvedAt || task.updatedAt || task.createdAt;
-          if (baseDate) {
-            const approvedDate = new Date(baseDate);
-            if (approvedDate >= startDate && approvedDate <= endDate) {
-              penaltyEventInPeriod = true;
+          
+          // For deadline_passed status, determine when the deadline actually passed
+          if (approvalStatus === "deadline_passed") {
+            // Calculate the deadline date that passed
+            let deadlinePassedDate: Date | null = null;
+            
+            if (task.deadlineTime) {
+              // For recurring tasks, use today's date if deadlineTime exists
+              if (isRecurring) {
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                deadlinePassedDate = task.deadlineDate ? new Date(task.deadlineDate) : today;
+                deadlinePassedDate.setHours(0, 0, 0, 0);
+              } else if (task.deadlineDate) {
+                deadlinePassedDate = new Date(task.deadlineDate);
+                deadlinePassedDate.setHours(0, 0, 0, 0);
+              } else {
+                deadlinePassedDate = new Date();
+                deadlinePassedDate.setHours(0, 0, 0, 0);
+              }
+              
+              // Parse deadline time
+              const [h, m] = task.deadlineTime.split(":");
+              deadlinePassedDate.setHours(parseInt(h), parseInt(m), 0, 0);
+            } else if (task.deadlineDate) {
+              deadlinePassedDate = new Date(task.deadlineDate);
+              deadlinePassedDate.setHours(23, 59, 59, 999);
+            } else if (task.dueDate) {
+              deadlinePassedDate = new Date(task.dueDate);
+              if (task.dueTime) {
+                const [h, m] = task.dueTime.split(":");
+                deadlinePassedDate.setHours(parseInt(h), parseInt(m), 0, 0);
+              } else {
+                deadlinePassedDate.setHours(23, 59, 59, 999);
+              }
+            }
+            
+            // Use the deadline date that passed, or fallback to approval/update date
+            if (deadlinePassedDate) {
+              baseDate = deadlinePassedDate;
+              // Normalize dates for comparison (compare dates, not times)
+              const deadlineDateNormalized = new Date(deadlinePassedDate);
+              deadlineDateNormalized.setHours(0, 0, 0, 0);
+              const startDateNormalized = new Date(startDate);
+              startDateNormalized.setHours(0, 0, 0, 0);
+              const endDateNormalized = new Date(endDate);
+              endDateNormalized.setHours(23, 59, 59, 999);
+              
+              // Check if this deadline date is within the selected period
+              if (deadlineDateNormalized >= startDateNormalized && deadlineDateNormalized <= endDateNormalized) {
+                penaltyEventInPeriod = true;
+              }
+            } else {
+              // Fallback to approval/update date if we can't determine deadline
+              baseDate = task.approvedAt || task.updatedAt || task.createdAt;
+              if (baseDate) {
+                const approvedDate = new Date(baseDate);
+                approvedDate.setHours(0, 0, 0, 0);
+                const startDateNormalized = new Date(startDate);
+                startDateNormalized.setHours(0, 0, 0, 0);
+                const endDateNormalized = new Date(endDate);
+                endDateNormalized.setHours(23, 59, 59, 999);
+                if (approvedDate >= startDateNormalized && approvedDate <= endDateNormalized) {
+                  penaltyEventInPeriod = true;
+                }
+              }
+            }
+          } else {
+            // For rejected status, use approval/update date
+            baseDate = task.approvedAt || task.updatedAt || task.createdAt;
+            if (baseDate) {
+              const approvedDate = new Date(baseDate);
+              approvedDate.setHours(0, 0, 0, 0);
+              const startDateNormalized = new Date(startDate);
+              startDateNormalized.setHours(0, 0, 0, 0);
+              const endDateNormalized = new Date(endDate);
+              endDateNormalized.setHours(23, 59, 59, 999);
+              if (approvedDate >= startDateNormalized && approvedDate <= endDateNormalized) {
+                penaltyEventInPeriod = true;
+              }
             }
           }
         }
@@ -315,8 +431,15 @@ export async function GET(request: NextRequest) {
       const completionDate = completion.approvedAt || completion.tickedAt || completion.completedAt || completion.createdAt;
       if (!completionDate) continue;
       
+      // Normalize dates for comparison
       const eventDate = new Date(completionDate);
-      if (eventDate < startDate || eventDate > endDate) {
+      eventDate.setHours(0, 0, 0, 0);
+      const startDateNormalized = new Date(startDate);
+      startDateNormalized.setHours(0, 0, 0, 0);
+      const endDateNormalized = new Date(endDate);
+      endDateNormalized.setHours(23, 59, 59, 999);
+      
+      if (eventDate < startDateNormalized || eventDate > endDateNormalized) {
         continue; // Skip if outside period
       }
 
@@ -400,10 +523,16 @@ export async function GET(request: NextRequest) {
     // ----------------------------
     // 3) Checklist Rewards/Fines from Daily Updates
     // ----------------------------
+    // Normalize dates for MongoDB query (ensure endDate includes the full day)
+    const startDateForQuery = new Date(startDate);
+    startDateForQuery.setHours(0, 0, 0, 0);
+    const endDateForQuery = new Date(endDate);
+    endDateForQuery.setHours(23, 59, 59, 999);
+    
     const dailyUpdatesQuery: any = {
       employeeId: employeeId,
       adminApproved: true,
-      date: { $gte: startDate, $lte: endDate }
+      date: { $gte: startDateForQuery, $lte: endDateForQuery }
     };
 
     const dailyUpdates = await db.collection('dailyUpdates').find(dailyUpdatesQuery).toArray();
@@ -468,7 +597,7 @@ export async function GET(request: NextRequest) {
     // ----------------------------
     const projects = await db.collection('projects').find({
       leadAssignee: { $in: [employeeId, employeeId.toString()] },
-      assignedAt: { $gte: startDate, $lte: endDate }
+      assignedAt: { $gte: startDateForQuery, $lte: endDateForQuery }
     }).toArray();
 
     for (const project of projects) {

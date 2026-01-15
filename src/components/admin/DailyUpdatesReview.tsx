@@ -569,9 +569,6 @@ export default function DailyUpdatesReview() {
                 <th className="px-6 py-4 text-center text-xs font-semibold uppercase tracking-wider">
                   Status
                 </th>
-                <th className="px-6 py-4 text-center text-xs font-semibold uppercase tracking-wider">
-                  Hours
-                </th>
                 {checklistColumns.map((label) => (
                   <th
                     key={label}
@@ -595,7 +592,7 @@ export default function DailyUpdatesReview() {
               {updates.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={checklistColumns.length + 8}
+                    colSpan={checklistColumns.length + 7}
                     className="px-6 py-16 text-center"
                   >
                     <div className="flex flex-col items-center gap-3">
@@ -662,18 +659,6 @@ export default function DailyUpdatesReview() {
                         ) : (
                           getStatusBadge(update.status)
                         )}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-center">
-                        <input
-                          type="number"
-                          min={0}
-                          step={0.5}
-                          value={currentData.hoursWorked ?? 0}
-                          onChange={(e) =>
-                            handleHoursChange(update._id, e.target.value)
-                          }
-                          className="w-20 px-2 py-1 border border-neutral-300 rounded-lg text-sm text-center focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                        />
                       </td>
                       {checklistColumns.map((label) => {
                         const item = currentData.checklist?.find((c: ChecklistItem) => c.label === label);
@@ -766,7 +751,7 @@ export default function DailyUpdatesReview() {
               {selectedRows.size} update{selectedRows.size !== 1 ? "s" : ""} selected for approval
             </p>
             <p className="text-xs text-emerald-800 mt-0.5">
-              Checklist changes and hours will be saved when you approve.
+              Checklist changes will be saved when you approve.
             </p>
           </div>
           <div className="flex items-center gap-3">

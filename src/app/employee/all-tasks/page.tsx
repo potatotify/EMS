@@ -447,6 +447,29 @@ export default function AllTasksPage() {
     }
   };
 
+  // Helper function to update a task in the nested tasks structure
+  const updateTaskInState = (taskId: string, updates: Partial<Task>) => {
+    setTasks((prevTasks) => {
+      const newTasks = { ...prevTasks };
+      for (const projectName in newTasks) {
+        for (const sectionName in newTasks[projectName]) {
+          const taskIndex = newTasks[projectName][sectionName].findIndex(
+            (t) => t._id === taskId
+          );
+          if (taskIndex !== -1) {
+            newTasks[projectName][sectionName] = [...newTasks[projectName][sectionName]];
+            newTasks[projectName][sectionName][taskIndex] = {
+              ...newTasks[projectName][sectionName][taskIndex],
+              ...updates,
+            };
+            return newTasks;
+          }
+        }
+      }
+      return prevTasks;
+    });
+  };
+
   const handleToggleComplete = async (task: Task) => {
     // Only allow ticking if task is assigned to the employee
     if (task.canTick === false) {
@@ -502,46 +525,66 @@ export default function AllTasksPage() {
     }
     
     const newStatus = task.status === "completed" ? "pending" : "completed";
+    const previousStatus = task.status; // Store previous status for rollback
     
-    // If completing the task, ask for time spent (only if task is assigned to user)
-    let timeSpent: number | undefined;
-    if (newStatus === "completed" && isAssigned) {
-      const timeInput = prompt("How many hours did you spend on this task?");
-      if (timeInput === null) {
-        return; // User cancelled
-      }
-      const parsedTime = parseFloat(timeInput);
-      if (isNaN(parsedTime) || parsedTime < 0) {
-        alert("Please enter a valid number of hours (e.g., 2.5 for 2 hours 30 minutes)");
-        return;
-      }
-      timeSpent = parsedTime;
-    }
+    // OPTIMISTIC UPDATE: Update UI immediately BEFORE any blocking operations
+    updateTaskInState(task._id, { status: newStatus });
     
-    try {
-      const requestBody: any = { status: newStatus };
-      if (timeSpent !== undefined) {
-        requestBody.timeSpent = timeSpent;
+    // Use setTimeout to defer prompt, allowing React to render the UI update first
+    setTimeout(async () => {
+      // If completing the task, ask for time spent (only if task is assigned to user)
+      let timeSpent: number | undefined;
+      if (newStatus === "completed" && isAssigned) {
+        const timeInput = prompt("How many hours did you spend on this task?");
+        if (timeInput === null) {
+          // User cancelled - rollback the optimistic update
+          updateTaskInState(task._id, { status: previousStatus });
+          return;
+        }
+        const parsedTime = parseFloat(timeInput);
+        if (isNaN(parsedTime) || parsedTime < 0) {
+          alert("Please enter a valid number of hours (e.g., 2.5 for 2 hours 30 minutes)");
+          // Rollback the optimistic update
+          updateTaskInState(task._id, { status: previousStatus });
+          return;
+        }
+        timeSpent = parsedTime;
       }
       
-      const response = await fetch(`/api/employee/tasks/${task._id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (response.ok) {
-        await fetchAllTasks();
-      } else {
-        const errorData = await response.json();
-        if (errorData.error) {
-          alert(errorData.error);
+      // Make API call in the background
+      try {
+        const requestBody: any = { status: newStatus };
+        if (timeSpent !== undefined) {
+          requestBody.timeSpent = timeSpent;
         }
+        
+        const response = await fetch(`/api/employee/tasks/${task._id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+        });
+
+        if (response.ok) {
+          // Optionally refresh to get latest data from server
+          // This ensures we have the latest state including tickedAt timestamp, etc.
+          await fetchAllTasks();
+        } else {
+          // API call failed - rollback the optimistic update
+          updateTaskInState(task._id, { status: previousStatus });
+          const errorData = await response.json();
+          if (errorData.error) {
+            alert(errorData.error);
+          } else {
+            alert("Failed to update task. Please try again.");
+          }
+        }
+      } catch (error) {
+        // Network error or other exception - rollback the optimistic update
+        updateTaskInState(task._id, { status: previousStatus });
+        console.error("Error updating task:", error);
+        alert("Failed to update task. Please try again.");
       }
-    } catch (error) {
-      console.error("Error updating task:", error);
-      alert("Failed to update task. Please try again.");
-    }
+    }, 0);
   };
 
   const handleToggleNotApplicable = async (task: Task) => {
@@ -621,19 +664,64 @@ export default function AllTasksPage() {
     }
   };
 
+  // Helper function to update a subtask in the nested tasks structure
+  const updateSubtaskInState = (subtaskId: string, updates: Partial<Subtask>) => {
+    setTasks((prevTasks) => {
+      const newTasks = { ...prevTasks };
+      for (const projectName in newTasks) {
+        for (const sectionName in newTasks[projectName]) {
+          for (let i = 0; i < newTasks[projectName][sectionName].length; i++) {
+            const task = newTasks[projectName][sectionName][i];
+            if (task.subtasks) {
+              const subtaskIndex = task.subtasks.findIndex((s) => s._id === subtaskId);
+              if (subtaskIndex !== -1) {
+                newTasks[projectName][sectionName] = [...newTasks[projectName][sectionName]];
+                newTasks[projectName][sectionName][i] = {
+                  ...task,
+                  subtasks: [...task.subtasks],
+                };
+                newTasks[projectName][sectionName][i].subtasks![subtaskIndex] = {
+                  ...task.subtasks[subtaskIndex],
+                  ...updates,
+                };
+                return newTasks;
+              }
+            }
+          }
+        }
+      }
+      return prevTasks;
+    });
+  };
+
   const handleToggleSubtask = async (subtaskId: string, currentTicked: boolean) => {
+    const newTicked = !currentTicked;
+    
+    // OPTIMISTIC UPDATE: Update UI immediately
+    updateSubtaskInState(subtaskId, { ticked: newTicked });
+    
+    // Make API call in the background
     try {
       const response = await fetch(`/api/subtasks/${subtaskId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticked: !currentTicked }),
+        body: JSON.stringify({ ticked: newTicked }),
       });
 
       if (response.ok) {
+        // Optionally refresh to get latest data from server
         await fetchAllTasks();
+      } else {
+        // API call failed - rollback the optimistic update
+        updateSubtaskInState(subtaskId, { ticked: currentTicked });
+        console.error("Failed to update subtask");
+        alert("Failed to update subtask. Please try again.");
       }
     } catch (error) {
+      // Network error or other exception - rollback the optimistic update
+      updateSubtaskInState(subtaskId, { ticked: currentTicked });
       console.error("Error updating subtask:", error);
+      alert("Failed to update subtask. Please try again.");
     }
   };
 
