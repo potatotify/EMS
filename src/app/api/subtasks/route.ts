@@ -82,7 +82,23 @@ export async function POST(req: NextRequest) {
     const lastSubtask = await Subtask.findOne({ taskId }).sort({ order: -1 });
     const order = lastSubtask ? lastSubtask.order + 1 : 0;
 
-    // Create the subtask with inherited recurrence from parent task
+    // Get task values (handle both Mongoose document and plain object)
+    const taskAny = task as any;
+    const taskBonusPoints = taskAny.bonusPoints;
+    const taskBonusCurrency = taskAny.bonusCurrency;
+    const taskPenaltyPoints = taskAny.penaltyPoints;
+    const taskPenaltyCurrency = taskAny.penaltyCurrency;
+    
+    console.log(`[Subtask Creation] Inheriting from task ${taskId}:`, {
+      bonusPoints: taskBonusPoints,
+      bonusCurrency: taskBonusCurrency,
+      penaltyPoints: taskPenaltyPoints,
+      penaltyCurrency: taskPenaltyCurrency,
+      deadlineDate: taskAny.deadlineDate,
+      deadlineTime: taskAny.deadlineTime,
+    });
+
+    // Create the subtask with inherited recurrence, bonus/fine, and deadline from parent task
     const subtask = new Subtask({
       taskId,
       projectId,
@@ -97,20 +113,38 @@ export async function POST(req: NextRequest) {
       order,
       createdBy: session.user.id,
       // Inherit recurrence settings from parent task
-      taskKind: task.taskKind || "one-time",
-      recurringPattern: task.recurringPattern ? {
-        frequency: task.recurringPattern.frequency,
-        interval: task.recurringPattern.interval,
-        endDate: task.recurringPattern.endDate,
-        daysOfWeek: task.recurringPattern.daysOfWeek,
-        dayOfMonth: task.recurringPattern.dayOfMonth,
+      taskKind: taskAny.taskKind || "one-time",
+      recurringPattern: taskAny.recurringPattern ? {
+        frequency: taskAny.recurringPattern.frequency,
+        interval: taskAny.recurringPattern.interval,
+        endDate: taskAny.recurringPattern.endDate,
+        daysOfWeek: taskAny.recurringPattern.daysOfWeek,
+        dayOfMonth: taskAny.recurringPattern.dayOfMonth,
       } : undefined,
-      customRecurrence: task.customRecurrence ? {
-        type: task.customRecurrence.type,
-        daysOfWeek: task.customRecurrence.daysOfWeek,
-        daysOfMonth: task.customRecurrence.daysOfMonth,
-        recurring: task.customRecurrence.recurring,
+      customRecurrence: taskAny.customRecurrence ? {
+        type: taskAny.customRecurrence.type,
+        daysOfWeek: taskAny.customRecurrence.daysOfWeek,
+        daysOfMonth: taskAny.customRecurrence.daysOfMonth,
+        recurring: taskAny.customRecurrence.recurring,
       } : undefined,
+      // Inherit bonus/fine from parent task (ensure we use actual values, not undefined)
+      bonusPoints: typeof taskBonusPoints === "number" ? taskBonusPoints : undefined,
+      bonusCurrency: typeof taskBonusCurrency === "number" ? taskBonusCurrency : undefined,
+      penaltyPoints: typeof taskPenaltyPoints === "number" ? taskPenaltyPoints : undefined,
+      penaltyCurrency: typeof taskPenaltyCurrency === "number" ? taskPenaltyCurrency : undefined,
+      // Inherit deadline from parent task
+      deadlineDate: taskAny.deadlineDate,
+      deadlineTime: taskAny.deadlineTime,
+      // Inherit approval status and notApplicable flag
+      approvalStatus: taskAny.approvalStatus || "pending",
+      notApplicable: taskAny.notApplicable || false,
+    });
+    
+    console.log(`[Subtask Creation] Created subtask with values:`, {
+      bonusPoints: subtask.bonusPoints,
+      bonusCurrency: subtask.bonusCurrency,
+      penaltyPoints: subtask.penaltyPoints,
+      penaltyCurrency: subtask.penaltyCurrency,
     });
 
     await subtask.save();
@@ -157,6 +191,51 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: "Subtask not found" }, { status: 404 });
     }
 
+    // If subtask is missing bonus/fine values, inherit from parent task
+    const subtaskAny = subtask as any;
+    const needsInheritance = 
+      (subtaskAny.bonusPoints === undefined || subtaskAny.bonusPoints === null) ||
+      (subtaskAny.bonusCurrency === undefined || subtaskAny.bonusCurrency === null) ||
+      (subtaskAny.penaltyPoints === undefined || subtaskAny.penaltyPoints === null) ||
+      (subtaskAny.penaltyCurrency === undefined || subtaskAny.penaltyCurrency === null) ||
+      !subtaskAny.deadlineDate || !subtaskAny.deadlineTime;
+    
+    if (needsInheritance) {
+      const parentTask = await Task.findById(subtask.taskId);
+      if (parentTask) {
+        const parentTaskAny = parentTask as any;
+        
+        // Inherit bonus/fine if missing
+        if (subtaskAny.bonusPoints === undefined || subtaskAny.bonusPoints === null) {
+          subtask.bonusPoints = typeof parentTaskAny.bonusPoints === "number" ? parentTaskAny.bonusPoints : undefined;
+        }
+        if (subtaskAny.bonusCurrency === undefined || subtaskAny.bonusCurrency === null) {
+          subtask.bonusCurrency = typeof parentTaskAny.bonusCurrency === "number" ? parentTaskAny.bonusCurrency : undefined;
+        }
+        if (subtaskAny.penaltyPoints === undefined || subtaskAny.penaltyPoints === null) {
+          subtask.penaltyPoints = typeof parentTaskAny.penaltyPoints === "number" ? parentTaskAny.penaltyPoints : undefined;
+        }
+        if (subtaskAny.penaltyCurrency === undefined || subtaskAny.penaltyCurrency === null) {
+          subtask.penaltyCurrency = typeof parentTaskAny.penaltyCurrency === "number" ? parentTaskAny.penaltyCurrency : undefined;
+        }
+        
+        // Inherit deadline if missing
+        if (!subtaskAny.deadlineDate && parentTaskAny.deadlineDate) {
+          subtask.deadlineDate = parentTaskAny.deadlineDate;
+        }
+        if (!subtaskAny.deadlineTime && parentTaskAny.deadlineTime) {
+          subtask.deadlineTime = parentTaskAny.deadlineTime;
+        }
+        
+        // Inherit approval status if missing
+        if (!subtaskAny.approvalStatus && parentTaskAny.approvalStatus) {
+          subtask.approvalStatus = parentTaskAny.approvalStatus;
+        }
+        
+        console.log(`[Subtask Update] Inherited values from parent task for subtask ${subtaskId}`);
+      }
+    }
+
     // Update fields
     if (title) subtask.title = title;
     if (description !== undefined) subtask.description = description;
@@ -169,6 +248,7 @@ export async function PUT(req: NextRequest) {
         subtask.completedAt = new Date();
         subtask.completedBy = new mongoose.Types.ObjectId(session.user.id);
         subtask.tickedAt = new Date();
+        subtask.ticked = true; // Also set ticked flag
       }
     }
 

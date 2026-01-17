@@ -3,6 +3,7 @@
 import {useSession} from "next-auth/react";
 import {useRouter} from "next/navigation";
 import {useEffect, useState} from "react";
+import dynamic from "next/dynamic";
 import {
   FolderKanban,
   Clock,
@@ -25,6 +26,16 @@ import AttendanceModal from "@/components/employee/AttendanceForm";
 import EmployeeBonusPointsSheet from "@/components/employee/EmployeeBonusPointsSheet";
 import AdminFeatures from "@/components/employee/AdminFeatures";
 import DailyUpdateModal from "@/components/employee/DailyUpdateModal";
+
+// Dynamically import AllTasks component
+const AllTasks = dynamic(() => import("@/components/employee/AllTasks"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex items-center justify-center min-h-[400px]">
+      <div className="w-8 h-8 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin"></div>
+    </div>
+  )
+});
 
 interface Project {
   _id: string;
@@ -117,11 +128,7 @@ export default function EmployeeDashboard() {
     }
   }, [status, session, router]);
 
-  useEffect(() => {
-    if (activeSection === "all-tasks") {
-      router.push("/employee/all-tasks");
-    }
-  }, [activeSection, router]);
+  // Removed redirect logic - all-tasks now renders in dashboard
 
   // Add visibility change listener to refresh data when tab becomes visible
   useEffect(() => {
@@ -271,7 +278,7 @@ export default function EmployeeDashboard() {
           </div>
         );
       case "all-tasks":
-        return null; // Navigation handled by useEffect
+        return <AllTasks />;
       case "bonus-fine":
         return <EmployeeBonusPointsSheet />;
       case "permissions":

@@ -16,6 +16,18 @@ export interface ISubtaskCompletion extends Document {
   tickedAt?: Date;
   completedAt?: Date;
   createdAt?: Date;
+  // Bonus/fine (inherited from parent task)
+  bonusPoints?: number;
+  bonusCurrency?: number;
+  penaltyPoints?: number;
+  penaltyCurrency?: number;
+  // Approval status
+  approvalStatus?: "pending" | "approved" | "rejected" | "deadline_passed";
+  // Deadline info
+  deadlineDate?: Date;
+  deadlineTime?: string;
+  dueDate?: Date;
+  dueTime?: string;
 }
 
 const SubtaskCompletionSchema = new Schema<ISubtaskCompletion>(
@@ -68,6 +80,19 @@ const SubtaskCompletionSchema = new Schema<ISubtaskCompletion>(
     completedByName: String,
     tickedAt: Date,
     completedAt: Date,
+    bonusPoints: Number,
+    bonusCurrency: Number,
+    penaltyPoints: Number,
+    penaltyCurrency: Number,
+    approvalStatus: {
+      type: String,
+      enum: ["pending", "approved", "rejected", "deadline_passed"],
+      default: "pending",
+    },
+    deadlineDate: Date,
+    deadlineTime: String,
+    dueDate: Date,
+    dueTime: String,
   },
   {
     timestamps: true,

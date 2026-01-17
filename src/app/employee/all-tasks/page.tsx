@@ -112,7 +112,12 @@ interface DailyUpdate {
   status?: string;
 }
 
-export default function AllTasksPage() {
+interface AllTasksPageProps {
+  embedded?: boolean; // If true, don't show header and use dashboard layout
+}
+
+export default function AllTasksPage(props: AllTasksPageProps = {}) {
+  const { embedded = false } = props;
   const { data: session, status } = useSession();
   const router = useRouter();
   const [tasks, setTasks] = useState<Record<string, Record<string, Task[]>>>({});
@@ -949,57 +954,58 @@ export default function AllTasksPage() {
   }
 
   return (
-    <div className="min-h-screen bg-neutral-50">
-      {/* Header */}
-      <div className="border-b border-neutral-200 bg-white sticky top-0 z-10 shadow-sm">
-        <div className="max-w-7xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <button
-                onClick={() => router.push("/employee/dashboard")}
-                className="p-2 hover:bg-neutral-100 rounded-lg transition-colors text-neutral-700"
-              >
-                <ChevronLeft className="w-5 h-5" />
-              </button>
-              <div>
-                <h1 className="text-2xl font-bold text-neutral-900">All Tasks</h1>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 relative">
-              {/* Search */}
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-neutral-400 w-4 h-4" />
-                <input
-                  type="text"
-                  placeholder="Search tasks..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-9 pr-3 py-1.5 text-sm border border-neutral-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-                />
-              </div>
-              {/* My Tasks Filter Button */}
-              <button
-                onClick={() => setShowOnlyMyTasks(!showOnlyMyTasks)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-colors ${
-                  showOnlyMyTasks
-                    ? "bg-emerald-50 border-emerald-300 text-emerald-700"
-                    : "bg-white border-neutral-200 text-neutral-700 hover:bg-neutral-50"
-                }`}
-                title={showOnlyMyTasks ? "Show all tasks" : "Show only my tasks"}
-              >
-                <User className={`w-4 h-4 ${showOnlyMyTasks ? "text-emerald-600" : "text-neutral-600"}`} />
-                <span className="text-sm font-medium">My Tasks</span>
-              </button>
-              {/* Display Menu */}
-              <div className="relative display-menu-container">
+    <div className={embedded ? "w-full" : "min-h-screen bg-neutral-50"}>
+      {/* Header - Only show if not embedded */}
+      {!embedded && (
+        <div className="border-b border-neutral-200 bg-white sticky top-0 z-10 shadow-sm">
+          <div className="max-w-7xl mx-auto px-6 py-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
                 <button
-                  onClick={() => setShowDisplayMenu(!showDisplayMenu)}
-                  className="flex items-center gap-1 px-3 py-1.5 bg-neutral-100 hover:bg-neutral-200 rounded-lg border border-neutral-200 transition-colors"
+                  onClick={() => router.push("/employee/dashboard")}
+                  className="p-2 hover:bg-neutral-100 rounded-lg transition-colors text-neutral-700"
                 >
-                  <LayoutGrid className="w-4 h-4 text-neutral-600" />
-                  <span className="text-sm text-neutral-700">Display</span>
-                  <ChevronDown className={`w-3 h-3 text-neutral-600 transition-transform ${showDisplayMenu ? "rotate-180" : ""}`} />
+                  <ChevronLeft className="w-5 h-5" />
                 </button>
+                <div>
+                  <h1 className="text-2xl font-bold text-neutral-900">All Tasks</h1>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 relative">
+                {/* Search */}
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-neutral-400 w-4 h-4" />
+                  <input
+                    type="text"
+                    placeholder="Search tasks..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-9 pr-3 py-1.5 text-sm border border-neutral-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                  />
+                </div>
+                {/* My Tasks Filter Button */}
+                <button
+                  onClick={() => setShowOnlyMyTasks(!showOnlyMyTasks)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-colors ${
+                    showOnlyMyTasks
+                      ? "bg-emerald-50 border-emerald-300 text-emerald-700"
+                      : "bg-white border-neutral-200 text-neutral-700 hover:bg-neutral-50"
+                  }`}
+                  title={showOnlyMyTasks ? "Show all tasks" : "Show only my tasks"}
+                >
+                  <User className={`w-4 h-4 ${showOnlyMyTasks ? "text-emerald-600" : "text-neutral-600"}`} />
+                  <span className="text-sm font-medium">My Tasks</span>
+                </button>
+                {/* Display Menu */}
+                <div className="relative display-menu-container">
+                  <button
+                    onClick={() => setShowDisplayMenu(!showDisplayMenu)}
+                    className="flex items-center gap-1 px-3 py-1.5 bg-neutral-100 hover:bg-neutral-200 rounded-lg border border-neutral-200 transition-colors"
+                  >
+                    <LayoutGrid className="w-4 h-4 text-neutral-600" />
+                    <span className="text-sm text-neutral-700">Display</span>
+                    <ChevronDown className={`w-3 h-3 text-neutral-600 transition-transform ${showDisplayMenu ? "rotate-180" : ""}`} />
+                  </button>
                 {showDisplayMenu && (
                   <div className="absolute right-0 mt-2 w-80 bg-white rounded-lg border border-neutral-200 shadow-lg z-50 display-menu-container max-h-[80vh] overflow-y-auto">
                     <div className="p-4 space-y-6">
@@ -1155,6 +1161,244 @@ export default function AllTasksPage() {
           </div>
         </div>
       </div>
+      )}
+
+      {/* Controls Bar - Show when embedded (in dashboard) */}
+      {embedded && (
+        <div className="border-b border-neutral-200 bg-white sticky top-0 z-10 shadow-sm mb-6">
+          <div className="max-w-full mx-auto px-6 py-4">
+            <div className="flex items-center justify-between flex-wrap gap-4">
+              <div className="flex items-center gap-2 relative flex-1 min-w-[200px]">
+                {/* Search */}
+                <div className="relative flex-1 max-w-md">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-neutral-400 w-4 h-4" />
+                  <input
+                    type="text"
+                    placeholder="Search tasks..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full pl-9 pr-3 py-1.5 text-sm border border-neutral-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                  />
+                </div>
+                {/* My Tasks Filter Button */}
+                <button
+                  onClick={() => setShowOnlyMyTasks(!showOnlyMyTasks)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap ${
+                    showOnlyMyTasks
+                      ? "bg-emerald-50 border-emerald-300 text-emerald-700"
+                      : "bg-white border-neutral-200 text-neutral-700 hover:bg-neutral-50"
+                  }`}
+                  title={showOnlyMyTasks ? "Show all tasks" : "Show only my tasks"}
+                >
+                  <User className={`w-4 h-4 ${showOnlyMyTasks ? "text-emerald-600" : "text-neutral-600"}`} />
+                  <span className="text-sm font-medium">My Tasks</span>
+                </button>
+                {/* Display Menu */}
+                <div className="relative display-menu-container">
+                  <button
+                    onClick={() => setShowDisplayMenu(!showDisplayMenu)}
+                    className="flex items-center gap-1 px-3 py-1.5 bg-neutral-100 hover:bg-neutral-200 rounded-lg border border-neutral-200 transition-colors whitespace-nowrap"
+                  >
+                    <LayoutGrid className="w-4 h-4 text-neutral-600" />
+                    <span className="text-sm text-neutral-700">Display</span>
+                    <ChevronDown className={`w-3 h-3 text-neutral-600 transition-transform ${showDisplayMenu ? "rotate-180" : ""}`} />
+                  </button>
+                  {showDisplayMenu && (
+                    <div className="absolute right-0 mt-2 w-80 bg-white rounded-lg border border-neutral-200 shadow-lg z-50 display-menu-container max-h-[80vh] overflow-y-auto">
+                      <div className="p-4 space-y-6">
+                        {/* View Mode */}
+                        <div>
+                          <div className="flex items-center gap-2 mb-3">
+                            <div className="w-2 h-2 bg-orange-500 rounded-full"></div>
+                            <h3 className="font-semibold text-neutral-900">Layout</h3>
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => setViewMode("board")}
+                              className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                                viewMode === "board"
+                                  ? "bg-emerald-50 border border-emerald-300 text-emerald-700"
+                                  : "bg-neutral-100 hover:bg-neutral-200 text-neutral-700 border border-transparent"
+                              }`}
+                            >
+                              Board
+                            </button>
+                            <button
+                              onClick={() => setViewMode("list")}
+                              className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                                viewMode === "list"
+                                  ? "bg-emerald-50 border border-emerald-300 text-emerald-700"
+                                  : "bg-neutral-100 hover:bg-neutral-200 text-neutral-700 border border-transparent"
+                              }`}
+                            >
+                              List
+                            </button>
+                            <button
+                              onClick={() => setViewMode("calendar")}
+                              className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                                viewMode === "calendar"
+                                  ? "bg-emerald-50 border border-emerald-300 text-emerald-700"
+                                  : "bg-neutral-100 hover:bg-neutral-200 text-neutral-700 border border-transparent"
+                              }`}
+                            >
+                              Calendar
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Group By */}
+                        <div>
+                          <h3 className="font-semibold mb-3 text-neutral-900">Group By</h3>
+                          <div>
+                            <label className="text-sm text-neutral-600 mb-1 block">Grouping</label>
+                            <select
+                              value={grouping}
+                              onChange={(e) => setGrouping(e.target.value)}
+                              className="w-full bg-white border border-neutral-300 rounded-lg px-3 py-2 text-sm text-neutral-900 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
+                            >
+                              <option value="none">None</option>
+                              <option value="project">Project</option>
+                              <option value="section">Section</option>
+                              <option value="status">Status</option>
+                              <option value="priority">Priority</option>
+                              <option value="assignee">Assignee</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        {/* Group By */}
+                        <div>
+                          <h3 className="font-semibold mb-3 text-neutral-900">Group By</h3>
+                          <div>
+                            <label className="text-sm text-neutral-600 mb-1 block">Grouping</label>
+                            <select
+                              value={grouping}
+                              onChange={(e) => setGrouping(e.target.value)}
+                              className="w-full bg-white border border-neutral-300 rounded-lg px-3 py-2 text-sm text-neutral-900 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
+                            >
+                              <option value="none">None</option>
+                              <option value="project">Project</option>
+                              <option value="section">Section</option>
+                              <option value="status">Status</option>
+                              <option value="priority">Priority</option>
+                              <option value="assignee">Assignee</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        {/* Filter */}
+                        <div>
+                          <h3 className="font-semibold mb-3 text-neutral-900">Filter</h3>
+                          <div className="space-y-3">
+                            <div>
+                              <label className="flex items-center gap-2 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={showOnlyMyTasks}
+                                  onChange={(e) => setShowOnlyMyTasks(e.target.checked)}
+                                  className="w-4 h-4 text-emerald-600 border-neutral-300 rounded focus:ring-emerald-500 focus:ring-2"
+                                />
+                                <span className="text-sm text-neutral-700 font-medium">Show only tasks assigned to me</span>
+                              </label>
+                            </div>
+                            <div>
+                              <label className="flex items-center gap-2 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={showDailyUpdates}
+                                  onChange={(e) => setShowDailyUpdates(e.target.checked)}
+                                  className="w-4 h-4 text-purple-600 border-neutral-300 rounded focus:ring-purple-500 focus:ring-2"
+                                />
+                                <span className="text-sm text-neutral-700 font-medium">Show Daily Updates section</span>
+                              </label>
+                            </div>
+                            <div>
+                              <label className="text-sm text-neutral-600 mb-1 block">Project</label>
+                              <select
+                                value={projectFilter}
+                                onChange={(e) => setProjectFilter(e.target.value)}
+                                className="w-full bg-white border border-neutral-300 rounded-lg px-3 py-2 text-sm text-neutral-900 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
+                              >
+                                <option value="all">All Projects</option>
+                                {getProjectNames().map((projectName) => (
+                                  <option key={projectName} value={projectName}>
+                                    {projectName}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="text-sm text-neutral-600 mb-1 block">Date</label>
+                              <select
+                                value={dateFilter}
+                                onChange={(e) => setDateFilter(e.target.value)}
+                                className="w-full bg-white border border-neutral-300 rounded-lg px-3 py-2 text-sm text-neutral-900 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
+                              >
+                                <option value="all">All</option>
+                                <option value="today">Today</option>
+                                <option value="overdue">Overdue</option>
+                                <option value="upcoming">Upcoming</option>
+                                <option value="no_date">No Date</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="text-sm text-neutral-600 mb-1 block">Priority</label>
+                              <select
+                                value={priorityFilter}
+                                onChange={(e) => setPriorityFilter(e.target.value)}
+                                className="w-full bg-white border border-neutral-300 rounded-lg px-3 py-2 text-sm text-neutral-900 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
+                              >
+                                <option value="all">All</option>
+                                <option value="high">High (7-10)</option>
+                                <option value="medium">Medium (4-6)</option>
+                                <option value="low">Low (1-3)</option>
+                              </select>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Sort */}
+                        <div>
+                          <h3 className="font-semibold mb-3 text-neutral-900">Sort</h3>
+                          <div>
+                            <label className="text-sm text-neutral-600 mb-1 block">Sorting</label>
+                            <select
+                              value={sorting}
+                              onChange={(e) => setSorting(e.target.value)}
+                              className="w-full bg-white border border-neutral-300 rounded-lg px-3 py-2 text-sm text-neutral-900 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
+                            >
+                              <option value="manual">Manual</option>
+                              <option value="priority">Priority</option>
+                              <option value="due_date">Due Date</option>
+                              <option value="created">Created Date</option>
+                              <option value="title">Title</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        {/* Reset */}
+                        <button
+                          onClick={() => {
+                            setProjectFilter("all");
+                            setDateFilter("all");
+                            setPriorityFilter("all");
+                            setSorting("manual");
+                            setSearchTerm("");
+                            setShowOnlyMyTasks(false);
+                          }}
+                          className="w-full text-red-500 hover:text-red-600 text-sm font-medium transition-colors"
+                        >
+                          Reset all
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Daily Updates Section - Only show in list view or when board view is not active */}
       {showDailyUpdates && viewMode === "list" && (

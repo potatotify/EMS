@@ -4,6 +4,7 @@ import { authOptions } from "../../../auth/[...nextauth]/route";
 import clientPromise, { dbConnect } from "@/lib/mongodb";
 import Task from "@/models/Task";
 import User from "@/models/User";
+import TaskCompletion from "@/models/TaskCompletion";
 import { ObjectId } from "mongodb";
 
 // PATCH - Update task (employee can only update status for assigned tasks)
@@ -245,18 +246,130 @@ export async function PATCH(
           task.markModified("timeSpent"); // Explicitly mark as modified to ensure save
         }
         
-        // Reset approval status when employee ticks task (needs re-approval)
-        task.approvalStatus = "pending";
-        task.approvedBy = undefined;
-        task.approvedAt = undefined;
-        
         // Always update completedBy to current user (fixes issue where re-ticking doesn't update)
         task.completedBy = new ObjectId(session.user.id);
         task.markModified("completedBy");
         
+        // Automatically apply bonus/fine based on deadline
+        const taskAny = task as any;
+        const now = new Date();
+        let deadlineDate: Date | null = null;
+        let deadlinePassed = false;
+        
+        // Calculate deadline date
+        if (taskAny.deadlineTime) {
+          if (taskAny.deadlineDate) {
+            deadlineDate = new Date(taskAny.deadlineDate);
+            deadlineDate.setHours(0, 0, 0, 0);
+          } else {
+            deadlineDate = new Date(now);
+            deadlineDate.setHours(0, 0, 0, 0);
+          }
+          const [hours, minutes] = taskAny.deadlineTime.split(":");
+          deadlineDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+        } else if (taskAny.deadlineDate) {
+          deadlineDate = new Date(taskAny.deadlineDate);
+          deadlineDate.setHours(23, 59, 59, 999);
+        } else if (taskAny.dueDate) {
+          deadlineDate = new Date(taskAny.dueDate);
+          if (taskAny.dueTime) {
+            const [hours, minutes] = taskAny.dueTime.split(":");
+            deadlineDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+          } else {
+            deadlineDate.setHours(23, 59, 59, 999);
+          }
+        }
+        
+        // Check if deadline passed
+        if (deadlineDate) {
+          deadlinePassed = tickedTime > deadlineDate;
+        }
+        
+        // Automatically set approval status based on deadline
+        // If deadline passed, mark as deadline_passed (fine will be applied)
+        // If deadline not passed, mark as approved (bonus will be applied)
+        if (deadlinePassed) {
+          task.approvalStatus = "deadline_passed";
+          task.approvedBy = undefined; // Auto-applied, no admin approval needed
+          task.approvedAt = tickedTime; // Set to ticked time
+        } else {
+          task.approvalStatus = "approved";
+          task.approvedBy = undefined; // Auto-applied, no admin approval needed
+          task.approvedAt = tickedTime; // Set to ticked time
+        }
+        
         if (!wasCompleted) {
           // Only update completedAt if transitioning from incomplete to complete
           task.completedAt = new Date();
+          
+          // For non-recurring tasks, create TaskCompletion record immediately
+          if (task.taskKind === "one-time") {
+            try {
+              const taskAny = task as any;
+              const usersCollection = db.collection("users");
+              
+              // Get completedBy name
+              let completedByName = "Unknown";
+              if (task.completedBy) {
+                const user = await usersCollection.findOne(
+                  { _id: task.completedBy instanceof ObjectId ? task.completedBy : new ObjectId(task.completedBy) },
+                  { projection: { name: 1 } }
+                );
+                if (user) {
+                  completedByName = user.name || "Unknown";
+                }
+              }
+              
+              // Get assignedToName
+              let assignedToName = taskAny.assignedToName || "Unassigned";
+              if (taskAny.assignedTo) {
+                const user = await usersCollection.findOne(
+                  { _id: taskAny.assignedTo instanceof ObjectId ? taskAny.assignedTo : new ObjectId(taskAny.assignedTo) },
+                  { projection: { name: 1 } }
+                );
+                if (user) {
+                  assignedToName = user.name || assignedToName;
+                }
+              }
+              
+              // Create TaskCompletion record
+              await TaskCompletion.create({
+                taskId: task._id,
+                taskTitle: task.title,
+                taskKind: task.taskKind,
+                projectId: task.projectId,
+                projectName: task.projectName,
+                section: task.section || "No Section",
+                assignedTo: taskAny.assignedTo || undefined,
+                assignedToName: assignedToName,
+                assignees: taskAny.assignees || undefined,
+                assigneeNames: taskAny.assigneeNames || undefined,
+                completedBy: task.completedBy,
+                completedByName: completedByName,
+                tickedAt: tickedTime,
+                completedAt: task.completedAt,
+                assignedDate: taskAny.assignedDate || taskAny.createdAt || undefined,
+                assignedTime: taskAny.assignedTime || undefined,
+                dueDate: taskAny.dueDate || undefined,
+                dueTime: taskAny.dueTime || undefined,
+                deadlineDate: taskAny.deadlineDate || undefined,
+                deadlineTime: taskAny.deadlineTime || undefined,
+                bonusPoints: taskAny.bonusPoints || 0,
+                bonusCurrency: taskAny.bonusCurrency || 0,
+                penaltyPoints: taskAny.penaltyPoints || 0,
+                penaltyCurrency: taskAny.penaltyCurrency || 0,
+                approvalStatus: deadlinePassed ? "deadline_passed" : "approved",
+                approvedAt: tickedTime,
+                customFields: taskAny.customFields || undefined,
+                customFieldValues: taskAny.customFieldValues || undefined,
+                priority: taskAny.priority || 2,
+              });
+              console.log(`[Task Completion] Created TaskCompletion record for non-recurring task ${task._id}`);
+            } catch (error) {
+              console.error("[Task Completion] Error creating TaskCompletion record:", error);
+              // Don't fail the request if TaskCompletion creation fails
+            }
+          }
         }
         // If already completed, we still update tickedAt above to reflect latest tick time
       } else if (body.status !== "completed" && wasCompleted) {
@@ -486,6 +599,31 @@ export async function DELETE(
       }, { status: 403 });
     }
 
+    // Delete all subtasks associated with this task
+    const client = await clientPromise;
+    const db = client.db("worknest");
+    
+    // Get all subtask IDs before deletion (for SubtaskCompletion cleanup)
+    const subtasks = await db.collection("subtasks").find({
+      taskId: new ObjectId(taskId)
+    }).project({ _id: 1 }).toArray();
+    
+    // Delete all subtasks
+    const subtasksResult = await db.collection("subtasks").deleteMany({
+      taskId: new ObjectId(taskId)
+    });
+    console.log(`[Task Delete] Deleted ${subtasksResult.deletedCount} subtask(s) for task ${taskId}`);
+
+    // Delete all SubtaskCompletion records for subtasks of this task
+    if (subtasks.length > 0) {
+      const subtaskIds = subtasks.map((st: any) => st._id);
+      const SubtaskCompletion = (await import("@/models/SubtaskCompletion")).default;
+      const subtaskCompletionResult = await SubtaskCompletion.deleteMany({
+        subtaskId: { $in: subtaskIds }
+      });
+      console.log(`[Task Delete] Deleted ${subtaskCompletionResult.deletedCount} SubtaskCompletion record(s) for task ${taskId}`);
+    }
+
     // Delete the task
     await Task.findByIdAndDelete(taskId);
     
@@ -494,6 +632,7 @@ export async function DELETE(
     return NextResponse.json({
       success: true,
       message: "Task deleted successfully",
+      deletedSubtasks: subtasksResult.deletedCount
     });
   } catch (error) {
     console.error("Error deleting task:", error);

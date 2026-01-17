@@ -401,6 +401,26 @@ async function calculateEmployeeBonusFine(employeeId: string, period: string, db
       continue;
     }
 
+    // Check project status - only process tasks from "active" projects
+    let projectStatus = null;
+    try {
+      const project = await db.collection('projects').findOne(
+        { _id: task.projectId instanceof ObjectId ? task.projectId : new ObjectId(task.projectId) },
+        { projection: { status: 1 } }
+      );
+      if (project) {
+        projectStatus = project.status || null;
+      }
+    } catch (e) {
+      // Couldn't fetch project status, skip this task
+      continue;
+    }
+
+    // Skip tasks from projects that are not "active"
+    if (projectStatus !== 'active') {
+      continue;
+    }
+
     // Check both penaltyCurrency and penaltyPoints
     let penaltyCurrency = typeof task.penaltyCurrency === 'number' ? task.penaltyCurrency : 0;
     const penaltyPoints = typeof task.penaltyPoints === 'number' ? task.penaltyPoints : 0;
@@ -615,6 +635,26 @@ async function calculateEmployeeBonusFine(employeeId: string, period: string, db
   for (const task of tasks) {
     // Skip tasks marked as not applicable
     if (task.notApplicable === true) {
+      continue;
+    }
+
+    // Check project status - only process tasks from "active" projects
+    let projectStatus = null;
+    try {
+      const project = await db.collection('projects').findOne(
+        { _id: task.projectId instanceof ObjectId ? task.projectId : new ObjectId(task.projectId) },
+        { projection: { status: 1 } }
+      );
+      if (project) {
+        projectStatus = project.status || null;
+      }
+    } catch (e) {
+      // Couldn't fetch project status, skip this task
+      continue;
+    }
+
+    // Skip tasks from projects that are not "active"
+    if (projectStatus !== 'active') {
       continue;
     }
 

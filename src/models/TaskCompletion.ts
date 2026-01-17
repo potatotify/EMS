@@ -17,10 +17,11 @@ export interface ITaskCompletion extends Document {
   assignedTime?: string; // Original assigned time
   
   // Completion details
-  completedBy: mongoose.Types.ObjectId;
+  completedBy?: mongoose.Types.ObjectId; // Can be null for unticked tasks
   completedByName?: string;
-  tickedAt: Date; // When employee ticked the task
-  completedAt: Date; // When task was marked complete
+  tickedAt?: Date; // When employee ticked the task (can be null for unticked tasks)
+  completedAt?: Date; // When task was marked complete (can be null for unticked tasks)
+  notTicked?: boolean; // Flag to indicate task was not ticked (for daily tasks)
   
   // Due dates at time of completion
   dueDate?: Date;
@@ -114,21 +115,26 @@ const TaskCompletionSchema = new Schema<ITaskCompletion>(
     },
     completedBy: {
       type: Schema.Types.ObjectId,
-      required: true,
       ref: "User",
       index: true,
+      // Allow null for unticked tasks
     },
     completedByName: {
       type: String,
     },
     tickedAt: {
       type: Date,
-      required: true,
       index: true,
+      // Allow null for unticked tasks
     },
     completedAt: {
       type: Date,
-      required: true,
+      // Allow null for unticked tasks
+    },
+    notTicked: {
+      type: Boolean,
+      default: false,
+      // Flag to indicate task was not ticked (for daily tasks)
     },
     dueDate: {
       type: Date,

@@ -16,13 +16,64 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
 
+    // Get pagination and filter parameters
+    const { searchParams } = new URL(request.url);
+    const page = parseInt(searchParams.get("page") || "1");
+    const limit = parseInt(searchParams.get("limit") || "10");
+    const skip = (page - 1) * limit;
+    
+    // Get filter parameters
+    const projectFilter = searchParams.get("projectFilter") || "all";
+    const employeeFilter = searchParams.get("employeeFilter") || "all";
+    const deadlineFilter = searchParams.get("deadlineFilter") || "all";
+
     await dbConnect();
 
     // Manually populate user references and project details
     const client = await clientPromise;
     const db = client.db("worknest");
 
+    // Fetch historical task completions first to identify which tasks have completion records
+    // Include both ticked tasks AND unticked daily tasks (notTicked flag)
+    // Limit initial fetch for performance
+    const allTaskCompletions = await TaskCompletion.find({
+      $or: [
+        { tickedAt: { $exists: true, $ne: null } }, // Tasks that were ticked
+        { notTicked: true, approvalStatus: "deadline_passed" } // Daily tasks that weren't ticked
+      ]
+    })
+      .sort({ createdAt: -1 }) // Sort by creation date instead of tickedAt (which can be null)
+      .limit(1000) // Increase limit to get all completions including unticked ones
+      .lean();
+    
+    // Deduplicate: For each taskId, keep only the LATEST completion
+    const taskCompletionMap = new Map<string, any>();
+    for (const completion of allTaskCompletions) {
+      if (!completion.taskId) continue;
+      const taskId = completion.taskId.toString();
+      const existing = taskCompletionMap.get(taskId);
+      
+      // Compare by createdAt if tickedAt is null, otherwise use tickedAt
+      const completionDate = completion.tickedAt ? new Date(completion.tickedAt) : new Date(completion.createdAt);
+      const existingDate = existing?.tickedAt ? new Date(existing.tickedAt) : (existing?.createdAt ? new Date(existing.createdAt) : null);
+      
+      if (!existing || !existingDate || completionDate > existingDate) {
+        taskCompletionMap.set(taskId, completion);
+      }
+    }
+    
+    // Convert map back to array (only latest completion per task)
+    const taskCompletions = Array.from(taskCompletionMap.values());
+    
+    // Get set of taskIds that have TaskCompletion records (for one-time tasks, we'll only show completions)
+    const tasksWithCompletions = new Set(
+      taskCompletions
+        .filter((tc: any) => tc.taskId)
+        .map((tc: any) => tc.taskId.toString())
+    );
+
     // Fetch only completed tasks (tasks that have been ticked at least once)
+    // Limit initial fetch to reduce memory usage - we'll fetch more if needed
     const tasks = await Task.find({
       $or: [
         { tickedAt: { $exists: true, $ne: null } },
@@ -31,9 +82,44 @@ export async function GET(request: NextRequest) {
       ]
     })
       .sort({ tickedAt: -1, completedAt: -1, createdAt: -1 })
+      .limit(100) // Fetch max 100 tasks initially for processing
       .lean();
 
+    // Fetch historical subtask completions (before fetching subtasks to avoid duplicates)
+    const SubtaskCompletion = (await import("@/models/SubtaskCompletion")).default;
+    const allSubtaskCompletions = await SubtaskCompletion.find({})
+      .sort({ createdAt: -1 }) // Sort by creation date instead of tickedAt (which can be null)
+      .limit(1000) // Increase limit to get all completions for deduplication
+      .lean();
+    
+    // Deduplicate: For each subtaskId, keep only the LATEST completion
+    const subtaskCompletionMap = new Map<string, any>();
+    for (const completion of allSubtaskCompletions) {
+      if (!completion.subtaskId) continue;
+      const subtaskId = completion.subtaskId.toString();
+      const existing = subtaskCompletionMap.get(subtaskId);
+      
+      // Compare by createdAt if tickedAt is null, otherwise use tickedAt
+      const completionDate = completion.tickedAt ? new Date(completion.tickedAt) : new Date(completion.createdAt);
+      const existingDate = existing?.tickedAt ? new Date(existing.tickedAt) : (existing?.createdAt ? new Date(existing.createdAt) : null);
+      
+      if (!existing || !existingDate || completionDate > existingDate) {
+        subtaskCompletionMap.set(subtaskId, completion);
+      }
+    }
+    
+    // Convert map back to array (only latest completion per subtask)
+    const subtaskCompletions = Array.from(subtaskCompletionMap.values());
+    
+    // Get set of subtaskIds that have SubtaskCompletion records
+    const subtasksWithCompletions = new Set(
+      subtaskCompletions
+        .filter((sc: any) => sc.subtaskId)
+        .map((sc: any) => sc.subtaskId.toString())
+    );
+
     // Fetch completed subtasks (where ticked is true or tickedAt exists)
+    // Limit initial fetch
     const subtasks = await db.collection("subtasks").find({
       $or: [
         { ticked: true },
@@ -41,18 +127,9 @@ export async function GET(request: NextRequest) {
       ]
     })
       .sort({ tickedAt: -1, createdAt: -1 })
+      .limit(100) // Fetch max 100 subtasks initially
       .toArray();
     
-    console.log(`[Task Analysis] Found ${subtasks.length} completed subtasks`);
-    if (subtasks.length > 0) {
-      console.log(`[Task Analysis] Sample subtask:`, {
-        id: subtasks[0]._id,
-        title: subtasks[0].title,
-        ticked: subtasks[0].ticked,
-        tickedAt: subtasks[0].tickedAt,
-        assignee: subtasks[0].assignee
-      });
-    }
     
     const usersCollection = db.collection("users");
     const projectsCollection = db.collection("projects");
@@ -60,18 +137,38 @@ export async function GET(request: NextRequest) {
 
     const taskRows = await Promise.all(
       tasks.map(async (task: any) => {
-        // Get project name
+        // IMPORTANT: Verify task is still ticked/completed
+        // If task is unticked or deleted, skip it
+        const isTicked = !!(task.tickedAt || task.completedAt || task.status === "completed");
+        if (!isTicked) {
+          return null;
+        }
+        
+        // Get project name and status
         let projectName = task.projectName || "Unknown";
+        let projectStatus = null;
         try {
           const project = await projectsCollection.findOne(
             { _id: task.projectId instanceof ObjectId ? task.projectId : new ObjectId(task.projectId) },
-            { projection: { projectName: 1 } }
+            { projection: { projectName: 1, status: 1 } }
           );
           if (project) {
             projectName = project.projectName || projectName;
+            projectStatus = project.status || null;
           }
         } catch (e) {
           // Use existing projectName
+        }
+
+        // For one-time tasks that have TaskCompletion records, skip showing the original task
+        // (we'll show them via TaskCompletion records instead to avoid duplicates)
+        if (task.taskKind === "one-time" && tasksWithCompletions.has(task._id.toString())) {
+          return null;
+        }
+
+        // Skip tasks from projects that are not "active"
+        if (projectStatus !== "active") {
+          return null;
         }
 
         // Populate assignedTo
@@ -257,114 +354,77 @@ export async function GET(request: NextRequest) {
           }
         }
 
-        // Calculate what employee got (reward or penalty)
+        // Automatically calculate what employee got based on deadline (no approval needed)
         let employeeGot = "";
         
-        if (approvalStatus === "approved") {
-          // Only show reward/penalty after approval
+        if (task.status === "completed" && task.tickedAt) {
           const now = new Date();
           let shouldGetPenalty = false;
           let shouldGetReward = false;
-
-          if (task.status === "completed") {
-            // Check if deadline has passed
-            if (task.deadlineDate) {
-              const deadlineDate = new Date(task.deadlineDate);
-              if (task.deadlineTime) {
-                const [hours, minutes] = task.deadlineTime.split(":");
-                deadlineDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
-              } else {
-                deadlineDate.setHours(23, 59, 59, 999);
-              }
-
-              const completedAt = task.tickedAt || task.completedAt || now;
-              if (completedAt > deadlineDate) {
-                shouldGetPenalty = true;
-              } else if (task.bonusPoints && task.bonusPoints > 0) {
+          
+          // Check if deadline has passed
+          if (deadlineDate) {
+            const completedAt = task.tickedAt || task.completedAt || now;
+            if (completedAt > deadlineDate) {
+              // Completed after deadline - apply fine
+              shouldGetPenalty = true;
+            } else {
+              // Completed before deadline - apply bonus
+              if (task.bonusPoints && task.bonusPoints > 0) {
                 shouldGetReward = true;
               }
-            } else if (task.dueDate) {
-              const dueDate = new Date(task.dueDate);
-              if (task.dueTime) {
-                const [hours, minutes] = task.dueTime.split(":");
-                dueDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
-              } else {
-                dueDate.setHours(23, 59, 59, 999);
-              }
-
-              const completedAt = task.tickedAt || task.completedAt || now;
-              if (completedAt > dueDate) {
-                shouldGetPenalty = true;
-              } else if (task.bonusPoints && task.bonusPoints > 0) {
-                shouldGetReward = true;
-              }
+            }
+          } else if (task.dueDate) {
+            const dueDate = new Date(task.dueDate);
+            if (task.dueTime) {
+              const [hours, minutes] = task.dueTime.split(":");
+              dueDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+            } else {
+              dueDate.setHours(23, 59, 59, 999);
+            }
+            
+            const completedAt = task.tickedAt || task.completedAt || now;
+            if (completedAt > dueDate) {
+              shouldGetPenalty = true;
             } else if (task.bonusPoints && task.bonusPoints > 0) {
               shouldGetReward = true;
             }
-          } else {
-            // Task not completed - check if deadline passed
-            if (task.deadlineDate) {
-              const deadlineDate = new Date(task.deadlineDate);
-              if (task.deadlineTime) {
-                const [hours, minutes] = task.deadlineTime.split(":");
-                deadlineDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
-              } else {
-                deadlineDate.setHours(23, 59, 59, 999);
-              }
-
-              if (now > deadlineDate) {
-                shouldGetPenalty = true;
-              }
-            } else if (task.dueDate) {
-              const dueDate = new Date(task.dueDate);
-              if (task.dueTime) {
-                const [hours, minutes] = task.dueTime.split(":");
-                dueDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
-              } else {
-                dueDate.setHours(23, 59, 59, 999);
-              }
-
-              if (now > dueDate) {
-                shouldGetPenalty = true;
-              }
-            }
+          } else if (task.bonusPoints && task.bonusPoints > 0) {
+            // No deadline, but has bonus - give reward
+            shouldGetReward = true;
           }
-
-          if (shouldGetPenalty && task.penaltyPoints && task.penaltyPoints > 0) {
-            employeeGot = `-${task.penaltyPoints} Penalty`;
-          } else if (shouldGetReward) {
-            employeeGot = `+${task.bonusPoints} Reward`;
-          } else if (task.status === "completed") {
-            employeeGot = "0 Points";
-          } else {
-            employeeGot = "Not Completed";
-          }
-        } else if (approvalStatus === "rejected") {
-          // If admin rejects, employee should get penalty (if configured), otherwise 0
-          if (task.penaltyPoints && task.penaltyPoints > 0) {
-            employeeGot = `-${task.penaltyPoints} Penalty`;
-          } else {
-            employeeGot = "0 Points";
-          }
-        } else if (approvalStatus === "deadline_passed") {
-          // Deadline passed: fines are automatically applied, so show penalty points
-          // The penalty points should be displayed regardless of approval status
-          // since fines are automatically applied when deadline passes
-          if (task.penaltyPoints !== null && task.penaltyPoints !== undefined) {
-            if (task.penaltyPoints > 0) {
+          
+          // Display what employee got
+          if (shouldGetPenalty) {
+            if (task.penaltyCurrency && task.penaltyCurrency > 0) {
+              employeeGot = `-₹${task.penaltyCurrency} Fine`;
+            } else if (task.penaltyPoints && task.penaltyPoints > 0) {
               employeeGot = `-${task.penaltyPoints} Penalty`;
             } else {
-              // Even if penaltyPoints is 0, show it since deadline passed
+              employeeGot = "0 Points";
+            }
+          } else if (shouldGetReward) {
+            if (task.bonusCurrency && task.bonusCurrency > 0) {
+              employeeGot = `+₹${task.bonusCurrency} Bonus`;
+            } else if (task.bonusPoints && task.bonusPoints > 0) {
+              employeeGot = `+${task.bonusPoints} Reward`;
+            } else {
               employeeGot = "0 Points";
             }
           } else {
-            // If penaltyPoints is not explicitly set, check if there's a penalty configured
-            // Default to showing "0 Points" if no penalty is configured
+            employeeGot = "0 Points";
+          }
+        } else if (deadlinePassed && task.status !== "completed") {
+          // Deadline passed and not completed - show fine
+          if (task.penaltyCurrency && task.penaltyCurrency > 0) {
+            employeeGot = `-₹${task.penaltyCurrency} Fine`;
+          } else if (task.penaltyPoints && task.penaltyPoints > 0) {
+            employeeGot = `-${task.penaltyPoints} Penalty`;
+          } else {
             employeeGot = "0 Points";
           }
         } else {
-          // Not approved yet - keep empty
-          employeeGot = "";
+          employeeGot = "Not Completed";
         }
 
         // Check if project exists
@@ -394,25 +454,25 @@ export async function GET(request: NextRequest) {
           entryType: "task",
           projectName,
           personAssignedTo: assignedToName,
-          taskAssignedBy: createdByName,
+          taskAssignedBy: createdByName || "N/A",
           taskName: task.title,
           taskKind: task.taskKind || "one-time",
           sectionName: task.section || "No Section",
-          assignedAtDate: task.assignedDate ? formatDate(task.assignedDate) : (task.createdAt ? formatDate(task.createdAt) : ""),
-          assignedAtTime: task.assignedTime || (task.assignedDate ? formatTime(task.assignedDate) : (task.createdAt ? formatTime(task.createdAt) : "")),
-          dateDue: task.dueDate ? formatDate(task.dueDate) : "",
-          timeDue: task.dueTime || (task.dueDate ? formatTime(task.dueDate) : ""),
-          deadlineDate: task.deadlineDate ? formatDate(task.deadlineDate) : "",
-          deadlineTime: task.deadlineTime || (task.deadlineDate ? formatTime(task.deadlineDate) : ""),
+          assignedAtDate: task.assignedDate ? formatDate(task.assignedDate) : (task.createdAt ? formatDate(task.createdAt) : "N/A"),
+          assignedAtTime: task.assignedTime || (task.assignedDate ? formatTime(task.assignedDate) : (task.createdAt ? formatTime(task.createdAt) : "N/A")),
+          dateDue: task.dueDate ? formatDate(task.dueDate) : "N/A",
+          timeDue: task.dueTime || (task.dueDate ? formatTime(task.dueDate) : "N/A"),
+          deadlineDate: task.deadlineDate ? formatDate(task.deadlineDate) : "N/A",
+          deadlineTime: task.deadlineTime || (task.deadlineDate ? formatTime(task.deadlineDate) : "N/A"),
           priority: task.priority || 2,
-          tickedBy: tickedByName || "",
+          tickedBy: tickedByName || "N/A",
           tickedTime: (() => {
             // Use tickedAt if available, otherwise fallback to completedAt
             const tickTime = task.tickedAt || task.completedAt;
             if (tickTime) {
               return `${formatDate(tickTime)} ${formatTime(tickTime)}`;
             }
-            return "";
+            return "N/A";
           })(),
           // Add raw date fields for sorting
           assignedAtDateISO: assignedDateRaw ? new Date(assignedDateRaw).toISOString() : null,
@@ -440,24 +500,65 @@ export async function GET(request: NextRequest) {
     // Process subtasks into analysis rows
     const subtaskRows = await Promise.all(
       subtasks.map(async (subtask: any) => {
+        // IMPORTANT: Verify subtask is still ticked/completed
+        // If subtask is unticked or deleted, skip it
+        const isTicked = !!(subtask.tickedAt || subtask.completedAt || subtask.ticked === true || subtask.status === "completed");
+        if (!isTicked) {
+          return null;
+        }
+        
+        // For subtasks that have SubtaskCompletion records, skip showing the original subtask
+        // (we'll show them via SubtaskCompletion records instead to avoid duplicates)
+        if (subtasksWithCompletions.has(subtask._id.toString())) {
+          return null;
+        }
+        
         // Get parent task info
         let parentTask: any = null;
         let projectName = 'Unknown Project';
         let section = 'No Section';
+        let projectStatus = null;
         try {
-          parentTask = await tasksCollection.findOne({ _id: subtask.taskId });
+          // Fetch parent task with all bonus/fine fields to ensure proper inheritance
+          parentTask = await tasksCollection.findOne(
+            { _id: subtask.taskId },
+            { projection: { 
+              title: 1, 
+              projectId: 1, 
+              section: 1, 
+              deadlineDate: 1, 
+              deadlineTime: 1, 
+              assignedDate: 1,
+              assignedTime: 1,
+              dueDate: 1,
+              dueTime: 1,
+              priority: 1,
+              taskKind: 1,
+              approvalStatus: 1,
+              bonusPoints: 1,
+              bonusCurrency: 1,
+              penaltyPoints: 1,
+              penaltyCurrency: 1
+            } }
+          );
           if (parentTask) {
             const project = await projectsCollection.findOne(
               { _id: parentTask.projectId instanceof ObjectId ? parentTask.projectId : new ObjectId(parentTask.projectId) },
-              { projection: { projectName: 1 } }
+              { projection: { projectName: 1, status: 1 } }
             );
             if (project) {
               projectName = project.projectName || 'Unknown Project';
+              projectStatus = project.status || null;
             }
             section = parentTask.section || 'No Section';
           }
         } catch (e) {
           console.error('Error fetching parent task for subtask:', e);
+        }
+
+        // Skip subtasks from projects that are not "active"
+        if (projectStatus !== "active") {
+          return null;
         }
 
         // Populate assignee (subtasks have a single assignee)
@@ -519,44 +620,173 @@ export async function GET(request: NextRequest) {
           return formatter.format(d);
         };
 
+        // Calculate deadline date for subtask - ALWAYS use parent task's deadline (subtasks inherit deadline from parent)
+        let deadlineDate: Date | null = null;
+        let deadlinePassed = false;
+        const now = new Date();
+        
+        // ALWAYS use parent task's deadline (subtasks inherit deadline from parent)
+        if (parentTask) {
+          const parentTaskAny = parentTask as any;
+          if (parentTaskAny.deadlineTime) {
+            if (parentTaskAny.deadlineDate) {
+              deadlineDate = new Date(parentTaskAny.deadlineDate);
+              deadlineDate.setHours(0, 0, 0, 0);
+            } else if (parentTaskAny.assignedDate) {
+              deadlineDate = new Date(parentTaskAny.assignedDate);
+              deadlineDate.setHours(0, 0, 0, 0);
+            } else if (subtask.createdAt) {
+              deadlineDate = new Date(subtask.createdAt);
+              deadlineDate.setHours(0, 0, 0, 0);
+            }
+            if (deadlineDate) {
+              const [h, m] = parentTaskAny.deadlineTime.split(":");
+              deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+            }
+          } else if (parentTaskAny.deadlineDate) {
+            deadlineDate = new Date(parentTaskAny.deadlineDate);
+            deadlineDate.setHours(23, 59, 59, 999);
+          }
+        }
+        
+        if (deadlineDate) {
+          deadlinePassed = now > deadlineDate;
+        }
+
+        // Calculate what employee got (similar to task logic)
+        let employeeGot = '';
+        const subtaskApprovalStatus = subtask.approvalStatus || parentTask?.approvalStatus || 'pending';
+        
+        // Subtasks ALWAYS inherit bonus/fine from parent task (never use subtask's own values)
+        const parentTaskAny = parentTask as any;
+        // Get bonus/fine directly from parent task
+        const bonus = parentTaskAny?.bonusPoints !== undefined && parentTaskAny?.bonusPoints !== null ? parentTaskAny.bonusPoints : 0;
+        const bonusCurrency = parentTaskAny?.bonusCurrency !== undefined && parentTaskAny?.bonusCurrency !== null ? parentTaskAny.bonusCurrency : 0;
+        const penalty = parentTaskAny?.penaltyPoints !== undefined && parentTaskAny?.penaltyPoints !== null ? parentTaskAny.penaltyPoints : 0;
+        const penaltyCurrency = parentTaskAny?.penaltyCurrency !== undefined && parentTaskAny?.penaltyCurrency !== null ? parentTaskAny.penaltyCurrency : 0;
+        
+        // Check if parent task has any bonus/fine values at all
+        // Check both if values exist AND if they're > 0
+        const hasBonusValue = bonusCurrency > 0 || bonus > 0;
+        const hasFineValue = penaltyCurrency > 0 || penalty > 0;
+        const hasBonus = (bonusCurrency !== undefined && bonusCurrency !== null) || (bonus !== undefined && bonus !== null);
+        const hasFine = (penaltyCurrency !== undefined && penaltyCurrency !== null) || (penalty !== undefined && penalty !== null);
+        const hasAnyReward = hasBonusValue || hasFineValue || hasBonus || hasFine;
+        
+        // Calculate what employee got based on approval status and deadline
+        // Simple logic: if parent has bonus/fine, always show bonus (before deadline) or fine (after deadline)
+        // Check if subtask is completed (either status === 'completed' or ticked === true)
+        const isCompleted = subtask.status === 'completed' || subtask.ticked === true;
+        const hasTickedAt = subtask.tickedAt || subtask.completedAt;
+        
+        if (isCompleted && hasTickedAt) {
+          const tickedAtDate = subtask.tickedAt || subtask.completedAt;
+          const completedAt = new Date(tickedAtDate);
+          const wasLate = deadlineDate ? completedAt > deadlineDate : false;
+          
+          // If parent task has bonus/fine values, always show either bonus or fine (never 0)
+          if (hasAnyReward) {
+            if (subtaskApprovalStatus === 'deadline_passed' || wasLate) {
+              // Ticked after deadline - show fine
+              if (hasFineValue) {
+                if (penaltyCurrency > 0) {
+                  employeeGot = `-₹${penaltyCurrency} Fine`;
+                } else if (penalty > 0) {
+                  employeeGot = `-${penalty} Penalty`;
+                } else {
+                  employeeGot = '0 Fine';
+                }
+              } else if (hasFine) {
+                employeeGot = '0 Fine';
+              } else if (hasBonusValue) {
+                // Has bonus but no fine - if ticked after deadline, show fine (but no fine value), so show 0
+                employeeGot = '0 Points';
+              } else {
+                employeeGot = '0 Points';
+              }
+            } else {
+              // Ticked before deadline - ALWAYS show bonus if parent has bonus/fine values
+              if (hasBonusValue) {
+                // Parent has bonus values > 0
+                if (bonusCurrency > 0) {
+                  employeeGot = `+₹${bonusCurrency} Bonus`;
+                } else if (bonus > 0) {
+                  employeeGot = `+${bonus} Reward`;
+                } else {
+                  employeeGot = '0 Bonus';
+                }
+              } else if (hasBonus) {
+                // Parent has bonus field but value is 0
+                employeeGot = '0 Bonus';
+              } else if (hasFineValue) {
+                // Parent has fine but no bonus - if ticked before deadline, no fine, show 0
+                employeeGot = '0 Points';
+              } else if (hasFine) {
+                // Parent has fine field but value is 0
+                employeeGot = '0 Points';
+              } else {
+                employeeGot = '0 Points';
+              }
+            }
+          } else {
+            // Parent task has no bonus/fine values - show 0 Points
+            employeeGot = '0 Points';
+          }
+        } else if (deadlinePassed && hasAnyReward) {
+          // Not completed and deadline passed - show fine if parent has fine values
+          if (penaltyCurrency > 0) {
+            employeeGot = `-₹${penaltyCurrency} Fine`;
+          } else if (penalty > 0) {
+            employeeGot = `-${penalty} Penalty`;
+          } else if (hasFine) {
+            employeeGot = '0 Fine';
+          } else {
+            employeeGot = '0 Points';
+          }
+        } else {
+          // Not completed or no bonus/fine - show 0 Points
+          employeeGot = '0 Points';
+        }
+
         return {
           _id: subtask._id.toString(),
           entryType: 'subtask',
           projectName,
           personAssignedTo: assigneeName,
-          taskAssignedBy: 'Admin/Lead', // Subtasks are assigned by admin or lead assignee
+          taskAssignedBy: 'N/A', // Subtasks are assigned by admin or lead assignee, show N/A if not available
           taskName: `${subtask.title} [Subtask of: ${parentTask?.title || 'Unknown Task'}]`,
-          taskKind: parentTask?.taskKind || 'one-time',
+          taskKind: subtask.taskKind || parentTask?.taskKind || 'one-time',
           sectionName: section,
-          assignedAtDate: subtask.createdAt ? formatDate(subtask.createdAt) : '',
-          assignedAtTime: subtask.createdAt ? formatTime(subtask.createdAt) : '',
-          dateDue: parentTask?.dueDate ? formatDate(parentTask.dueDate) : '',
-          timeDue: parentTask?.dueTime || '',
-          deadlineDate: parentTask?.deadlineDate ? formatDate(parentTask.deadlineDate) : '',
-          deadlineTime: parentTask?.deadlineTime || '',
-          priority: parentTask?.priority || 2,
-          tickedBy: tickedByName || '',
+          assignedAtDate: subtask.createdAt ? formatDate(subtask.createdAt) : (parentTask?.assignedDate ? formatDate(parentTask.assignedDate) : (parentTask?.createdAt ? formatDate(parentTask.createdAt) : "N/A")),
+          assignedAtTime: subtask.createdAt ? formatTime(subtask.createdAt) : (parentTask?.assignedTime || (parentTask?.assignedDate ? formatTime(parentTask.assignedDate) : (parentTask?.createdAt ? formatTime(parentTask.createdAt) : "N/A"))),
+          dateDue: subtask.dueDate ? formatDate(subtask.dueDate) : (parentTask?.dueDate ? formatDate(parentTask.dueDate) : "N/A"),
+          timeDue: subtask.dueTime || parentTask?.dueTime || "N/A",
+          // ALWAYS show parent task's deadline (subtasks inherit deadline from parent)
+          deadlineDate: parentTask?.deadlineDate ? formatDate(parentTask.deadlineDate) : "N/A",
+          deadlineTime: parentTask?.deadlineTime || "N/A",
+          priority: subtask.priority || parentTask?.priority || 2,
+          tickedBy: tickedByName || "N/A",
           tickedTime: (() => {
             const tickTime = subtask.tickedAt || subtask.completedAt;
             if (tickTime) {
               return `${formatDate(tickTime)} ${formatTime(tickTime)}`;
             }
-            return '';
+            return "N/A";
           })(),
           // Add raw date fields for sorting
           assignedAtDateISO: subtask.createdAt ? new Date(subtask.createdAt).toISOString() : null,
           tickedAt: subtask.tickedAt ? new Date(subtask.tickedAt).toISOString() : (subtask.completedAt ? new Date(subtask.completedAt).toISOString() : null),
           completedAt: subtask.completedAt ? new Date(subtask.completedAt).toISOString() : null,
           createdAt: subtask.createdAt ? new Date(subtask.createdAt).toISOString() : null,
-          rewardsPoint: 0, // Subtasks don't have individual rewards
-          rewardsCurrency: 0,
-          penaltyPoint: 0,
-          penaltyCurrency: 0,
-          employeeGot: '', // No points for subtasks
+          rewardsPoint: bonus,
+          rewardsCurrency: bonusCurrency,
+          penaltyPoint: penalty,
+          penaltyCurrency: penaltyCurrency,
+          employeeGot: employeeGot,
           status: subtask.status || 'pending',
-          approvalStatus: parentTask?.approvalStatus || 'pending',
-          approvedBy: '',
-          deadlinePassed: false,
+          approvalStatus: subtaskApprovalStatus,
+          approvedBy: "N/A",
+          deadlinePassed: deadlinePassed,
           customFields: [],
           customFieldValues: {},
           createdByEmployee: false,
@@ -673,16 +903,8 @@ export async function GET(request: NextRequest) {
       })
     );
 
-    // Fetch historical task completions (for recurring tasks that were reset)
-    const taskCompletions = await TaskCompletion.find({})
-      .sort({ tickedAt: -1 })
-      .lean();
-
-    // Fetch historical subtask completions  
-    const SubtaskCompletion = (await import("@/models/SubtaskCompletion")).default;
-    const subtaskCompletions = await SubtaskCompletion.find({})
-      .sort({ tickedAt: -1 })
-      .lean();
+    // TaskCompletions and SubtaskCompletions already fetched above for deduplication
+    // No need to fetch again
 
     const completionRows = await Promise.all(
       taskCompletions.map(async (completion: any) => {
@@ -712,55 +934,101 @@ export async function GET(request: NextRequest) {
           return formatter.format(d);
         };
 
-        // Calculate what employee got
+        // Automatically calculate what employee got based on deadline (no approval needed)
         let employeeGot = "";
-        const completionApprovalStatus = completion.approvalStatus || "pending";
+        const now = new Date();
         
-        if (completionApprovalStatus === "approved") {
-          if (completion.actualPoints !== undefined) {
-            if (completion.actualPoints > 0) {
-              employeeGot = `+${completion.actualPoints} Points`;
-            } else if (completion.actualPoints < 0) {
-              employeeGot = `${completion.actualPoints} Points`;
+        // Handle unticked daily tasks (notTicked flag)
+        if (completion.notTicked && completion.approvalStatus === "deadline_passed") {
+          // Task was not ticked - show fine
+          if (completion.penaltyCurrency && completion.penaltyCurrency > 0) {
+            employeeGot = `-₹${completion.penaltyCurrency} Fine (Not Ticked)`;
+          } else if (completion.penaltyPoints && completion.penaltyPoints > 0) {
+            employeeGot = `-${completion.penaltyPoints} Penalty (Not Ticked)`;
+          } else {
+            employeeGot = "0 Points (Not Ticked)";
+          }
+        } else if (completion.tickedAt) {
+          let shouldGetPenalty = false;
+          let shouldGetReward = false;
+          
+          // Calculate deadline
+          let completionDeadlineDate: Date | null = null;
+          if (completion.deadlineTime) {
+            if (completion.deadlineDate) {
+              completionDeadlineDate = new Date(completion.deadlineDate);
+              completionDeadlineDate.setHours(0, 0, 0, 0);
+            } else {
+              completionDeadlineDate = new Date(completion.tickedAt);
+              completionDeadlineDate.setHours(0, 0, 0, 0);
+            }
+            const [hours, minutes] = completion.deadlineTime.split(":");
+            completionDeadlineDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+          } else if (completion.deadlineDate) {
+            completionDeadlineDate = new Date(completion.deadlineDate);
+            completionDeadlineDate.setHours(23, 59, 59, 999);
+          } else if (completion.dueDate) {
+            completionDeadlineDate = new Date(completion.dueDate);
+            if (completion.dueTime) {
+              const [hours, minutes] = completion.dueTime.split(":");
+              completionDeadlineDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+            } else {
+              completionDeadlineDate.setHours(23, 59, 59, 999);
+            }
+          }
+          
+          if (completionDeadlineDate) {
+            const completedAt = completion.tickedAt || completion.completedAt || now;
+            if (completedAt > completionDeadlineDate) {
+              shouldGetPenalty = true;
+            } else {
+              if (completion.bonusPoints && completion.bonusPoints > 0) {
+                shouldGetReward = true;
+              }
             }
           } else if (completion.bonusPoints && completion.bonusPoints > 0) {
-            employeeGot = `+${completion.bonusPoints} Points`;
-          } else if (completion.penaltyPoints && completion.penaltyPoints > 0) {
-            employeeGot = `-${completion.penaltyPoints} Points`;
+            shouldGetReward = true;
           }
-        } else if (completionApprovalStatus === "deadline_passed") {
-          // Deadline passed: fines are automatically applied, so show penalty points
-          // The penalty points should be displayed regardless of approval status
-          if (completion.penaltyPoints !== null && completion.penaltyPoints !== undefined) {
-            if (completion.penaltyPoints > 0) {
+          
+          // Display what employee got
+          if (shouldGetPenalty) {
+            if (completion.penaltyCurrency && completion.penaltyCurrency > 0) {
+              employeeGot = `-₹${completion.penaltyCurrency} Fine`;
+            } else if (completion.penaltyPoints && completion.penaltyPoints > 0) {
               employeeGot = `-${completion.penaltyPoints} Penalty`;
             } else {
-              // Even if penaltyPoints is 0, show it since deadline passed
+              employeeGot = "0 Points";
+            }
+          } else if (shouldGetReward) {
+            if (completion.bonusCurrency && completion.bonusCurrency > 0) {
+              employeeGot = `+₹${completion.bonusCurrency} Bonus`;
+            } else if (completion.bonusPoints && completion.bonusPoints > 0) {
+              employeeGot = `+${completion.bonusPoints} Reward`;
+            } else {
               employeeGot = "0 Points";
             }
           } else {
-            // If penaltyPoints is not explicitly set, default to showing "0 Points"
             employeeGot = "0 Points";
           }
-        } else if (completionApprovalStatus === "rejected") {
-          // If admin rejects, employee should get penalty (if configured), otherwise 0
-          if (completion.penaltyPoints && completion.penaltyPoints > 0) {
-            employeeGot = `-${completion.penaltyPoints} Penalty`;
-          } else {
-            employeeGot = "0 Points";
-          }
+        } else {
+          employeeGot = "Not Completed";
         }
 
-        // Check if project exists
+        // Check if project exists and get status
         let projectExists = true;
         let projectDeleted = false;
         let projectNameDisplay = completion.projectName || "Unknown";
+        let projectStatus = null;
         try {
           const projectCheck = await projectsCollection.findOne(
-            { _id: completion.projectId instanceof ObjectId ? completion.projectId : new ObjectId(completion.projectId) }
+            { _id: completion.projectId instanceof ObjectId ? completion.projectId : new ObjectId(completion.projectId) },
+            { projection: { projectName: 1, status: 1 } }
           );
           projectExists = !!projectCheck;
           projectDeleted = !projectCheck;
+          if (projectCheck) {
+            projectStatus = projectCheck.status || null;
+          }
           if (projectDeleted) {
             projectNameDisplay = `${completion.projectName} (Project Deleted)`;
           }
@@ -769,9 +1037,40 @@ export async function GET(request: NextRequest) {
           projectNameDisplay = `${completion.projectName} (Project Deleted)`;
         }
 
+        // Skip task completions from projects that are not "active"
+        if (projectStatus !== "active") {
+          return null;
+        }
+
+        // IMPORTANT: Check if the original task still exists and is still ticked
+        // If task is deleted or unticked, skip this completion entry
+        let taskExists = false;
+        let taskStillTicked = false;
+        try {
+          if (completion.taskId) {
+            const originalTask = await tasksCollection.findOne(
+              { _id: completion.taskId instanceof ObjectId ? completion.taskId : new ObjectId(completion.taskId) },
+              { projection: { status: 1, tickedAt: 1, completedAt: 1 } }
+            );
+            if (originalTask) {
+              taskExists = true;
+              // Check if task is still ticked (has tickedAt or completedAt, or status is completed)
+              taskStillTicked = !!(originalTask.tickedAt || originalTask.completedAt || originalTask.status === "completed");
+            }
+          }
+        } catch (e) {
+          // Task doesn't exist or error checking
+          taskExists = false;
+        }
+        
+        // Skip if task is deleted or unticked
+        if (!taskExists || !taskStillTicked) {
+          return null;
+        }
+        
         // Get assigned date/time - prefer stored assignedDate/assignedTime, then try original task, then tickedAt
-        let assignedAtDate = "";
-        let assignedAtTime = "";
+        let assignedAtDate = "N/A";
+        let assignedAtTime = "N/A";
         let assignedAtDateISO: string | null = null;
         
         // First check if assignedDate/assignedTime are stored in completion record
@@ -805,11 +1104,11 @@ export async function GET(request: NextRequest) {
           }
           
           // If we couldn't get original task date, use tickedAt (when employee actually worked on it)
-          if (!assignedAtDate && completion.tickedAt) {
+          if (assignedAtDate === "N/A" && completion.tickedAt) {
             assignedAtDate = formatDate(completion.tickedAt);
             assignedAtTime = formatTime(completion.tickedAt);
             assignedAtDateISO = new Date(completion.tickedAt).toISOString();
-          } else if (!assignedAtDate && completion.createdAt) {
+          } else if (assignedAtDate === "N/A" && completion.createdAt) {
             // Last fallback: use completion record creation date
             assignedAtDate = formatDate(completion.createdAt);
             assignedAtTime = formatTime(completion.createdAt);
@@ -821,20 +1120,20 @@ export async function GET(request: NextRequest) {
           _id: completion._id.toString(),
           entryType: "task_completion",
           projectName: projectNameDisplay,
-          personAssignedTo: completion.assignedToName || completion.assigneeNames?.[0] || "Unknown",
-          taskAssignedBy: "Admin", // Historical data, assume admin
+          personAssignedTo: completion.assignedToName || completion.assigneeNames?.[0] || "N/A",
+          taskAssignedBy: "N/A", // Historical data, show N/A if not available
           taskName: `${completion.taskTitle} (${completion.taskKind})`,
           taskKind: completion.taskKind,
           sectionName: completion.section || "No Section",
           assignedAtDate,
           assignedAtTime,
-          dateDue: completion.dueDate ? formatDate(completion.dueDate) : "",
-          timeDue: completion.dueTime || "",
-          deadlineDate: completion.deadlineDate ? formatDate(completion.deadlineDate) : "",
-          deadlineTime: completion.deadlineTime || "",
+          dateDue: completion.dueDate ? formatDate(completion.dueDate) : "N/A",
+          timeDue: completion.dueTime || "N/A",
+          deadlineDate: completion.deadlineDate ? formatDate(completion.deadlineDate) : "N/A",
+          deadlineTime: completion.deadlineTime || "N/A",
           priority: completion.priority || 2,
-          tickedBy: completion.completedByName || "",
-          tickedTime: completion.tickedAt ? `${formatDate(completion.tickedAt)} ${formatTime(completion.tickedAt)}` : "",
+          tickedBy: completion.notTicked ? "Not Ticked" : (completion.completedByName || "N/A"),
+          tickedTime: completion.notTicked ? "Not Ticked" : (completion.tickedAt ? `${formatDate(completion.tickedAt)} ${formatTime(completion.tickedAt)}` : "N/A"),
           // Add raw date fields for sorting
           assignedAtDateISO: assignedAtDateISO,
           tickedAt: completion.tickedAt ? new Date(completion.tickedAt).toISOString() : null,
@@ -847,12 +1146,13 @@ export async function GET(request: NextRequest) {
           employeeGot,
           status: "completed", // All completions are completed
           approvalStatus: completion.approvalStatus || "pending",
-          approvedBy: completion.approvedByName || "",
+          approvedBy: completion.approvedByName || "N/A",
           deadlinePassed: false, // Historical data
           customFields: completion.customFields || [],
           customFieldValues: completion.customFieldValues || {},
           createdByEmployee: false,
-          isHistorical: true, // Flag to indicate this is historical data
+          // Only mark as historical if it's a recurring task (one-time tasks are not historical)
+          isHistorical: completion.taskKind !== "one-time", // Historical only for recurring tasks
           isTaskCompletion: true, // Flag to indicate this is a TaskCompletion record
           projectDeleted,
           projectExists,
@@ -864,6 +1164,53 @@ export async function GET(request: NextRequest) {
     // Process subtask completion history
     const subtaskCompletionRows = await Promise.all(
       subtaskCompletions.map(async (completion: any) => {
+        // IMPORTANT: Check if the original subtask still exists and is still ticked
+        // If subtask is deleted or unticked, skip this completion entry
+        let subtaskExists = false;
+        let subtaskStillTicked = false;
+        try {
+          if (completion.subtaskId) {
+            const originalSubtask = await db.collection("subtasks").findOne(
+              { _id: completion.subtaskId instanceof ObjectId ? completion.subtaskId : new ObjectId(completion.subtaskId) },
+              { projection: { status: 1, tickedAt: 1, completedAt: 1, ticked: 1 } }
+            );
+            if (originalSubtask) {
+              subtaskExists = true;
+              // Check if subtask is still ticked
+              subtaskStillTicked = !!(originalSubtask.tickedAt || originalSubtask.completedAt || originalSubtask.ticked === true || originalSubtask.status === "completed");
+            }
+          }
+        } catch (e) {
+          // Subtask doesn't exist or error checking
+          subtaskExists = false;
+        }
+        
+        // Skip if subtask is deleted or unticked
+        if (!subtaskExists || !subtaskStillTicked) {
+          return null;
+        }
+        
+        // Check project status for subtask completions
+        let projectStatus = null;
+        if (completion.projectId) {
+          try {
+            const project = await projectsCollection.findOne(
+              { _id: completion.projectId instanceof ObjectId ? completion.projectId : new ObjectId(completion.projectId) },
+              { projection: { status: 1 } }
+            );
+            if (project) {
+              projectStatus = project.status || null;
+            }
+          } catch (e) {
+            // Couldn't fetch project status
+          }
+        }
+
+        // Skip subtask completions from projects that are not "active"
+        if (projectStatus !== "active") {
+          return null;
+        }
+
         const formatDate = (date: Date | string | undefined | null) => {
           if (!date) return '';
           const d = typeof date === 'string' ? new Date(date) : date;
@@ -886,94 +1233,158 @@ export async function GET(request: NextRequest) {
           });
         };
 
+        // Automatically calculate what employee got based on deadline and approval status
+        let employeeGot = '';
+        const now = new Date();
+        
+        // Get bonus/fine from completion record (inherited from parent task)
+        const bonus = completion.bonusPoints !== undefined && completion.bonusPoints !== null ? completion.bonusPoints : 0;
+        const bonusCurrency = completion.bonusCurrency !== undefined && completion.bonusCurrency !== null ? completion.bonusCurrency : 0;
+        const penalty = completion.penaltyPoints !== undefined && completion.penaltyPoints !== null ? completion.penaltyPoints : 0;
+        const penaltyCurrency = completion.penaltyCurrency !== undefined && completion.penaltyCurrency !== null ? completion.penaltyCurrency : 0;
+        
+        // Check if parent task has any bonus/fine values at all
+        // IMPORTANT: Check if values exist (even if 0) OR if they're > 0
+        const hasBonus = (bonusCurrency !== undefined && bonusCurrency !== null && bonusCurrency >= 0) || (bonus !== undefined && bonus !== null && bonus >= 0);
+        const hasFine = (penaltyCurrency !== undefined && penaltyCurrency !== null && penaltyCurrency >= 0) || (penalty !== undefined && penalty !== null && penalty >= 0);
+        const hasAnyReward = hasBonus || hasFine;
+        
+        // For display, check if values are actually > 0
+        const hasBonusValue = bonusCurrency > 0 || bonus > 0;
+        const hasFineValue = penaltyCurrency > 0 || penalty > 0;
+        
+        // Check approval status first
+        const approvalStatus = completion.approvalStatus || 'pending';
+        
+        if (completion.tickedAt) {
+          // Calculate deadline (inherit from parent task)
+          let completionDeadlineDate: Date | null = null;
+          if (completion.deadlineTime) {
+            if (completion.deadlineDate) {
+              completionDeadlineDate = new Date(completion.deadlineDate);
+              completionDeadlineDate.setHours(0, 0, 0, 0);
+            } else if (completion.tickedAt) {
+              completionDeadlineDate = new Date(completion.tickedAt);
+              completionDeadlineDate.setHours(0, 0, 0, 0);
+            }
+            if (completionDeadlineDate) {
+              const [hours, minutes] = completion.deadlineTime.split(":");
+              completionDeadlineDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+            }
+          } else if (completion.deadlineDate) {
+            completionDeadlineDate = new Date(completion.deadlineDate);
+            completionDeadlineDate.setHours(23, 59, 59, 999);
+          }
+          
+          const completedAt = new Date(completion.tickedAt);
+          const deadlinePassed = completionDeadlineDate ? completedAt > completionDeadlineDate : false;
+          
+          // Simple logic: if parent has bonus/fine, always show either bonus (before deadline) or fine (after deadline)
+          if (hasAnyReward) {
+            if (approvalStatus === 'deadline_passed' || deadlinePassed) {
+              // Ticked after deadline - show fine
+              if (hasFineValue) {
+                if (penaltyCurrency > 0) {
+                  employeeGot = `-₹${penaltyCurrency} Fine`;
+                } else if (penalty > 0) {
+                  employeeGot = `-${penalty} Penalty`;
+                } else {
+                  employeeGot = '0 Fine';
+                }
+              } else if (hasFine) {
+                employeeGot = '0 Fine';
+              } else {
+                employeeGot = '0 Points';
+              }
+            } else {
+              // Ticked before deadline - ALWAYS show bonus if parent has bonus/fine values
+              if (hasBonusValue) {
+                if (bonusCurrency > 0) {
+                  employeeGot = `+₹${bonusCurrency} Bonus`;
+                } else if (bonus > 0) {
+                  employeeGot = `+${bonus} Reward`;
+                } else {
+                  employeeGot = '0 Bonus';
+                }
+              } else if (hasBonus) {
+                employeeGot = '0 Bonus';
+              } else if (hasFineValue) {
+                // Has fine but no bonus - if ticked before deadline, no fine, show 0
+                employeeGot = '0 Points';
+              } else {
+                employeeGot = '0 Points';
+              }
+            }
+          } else {
+            // Parent task has no bonus/fine values - show 0 Points
+            employeeGot = '0 Points';
+          }
+        } else {
+          employeeGot = 'Not Completed';
+        }
+
         return {
           _id: completion._id.toString(),
           entryType: 'subtask_completion',
           projectName: completion.projectName,
           personAssignedTo: completion.assigneeNames?.join(', ') || 'Unknown',
-          taskAssignedBy: 'Admin/Lead',
+          taskAssignedBy: 'N/A',
           taskName: `${completion.subtaskTitle} [Subtask of: ${completion.parentTaskTitle}]`,
           taskKind: completion.taskKind,
           sectionName: completion.section || 'No Section',
-          assignedAtDate: '',
-          assignedAtTime: '',
-          dateDue: '',
-          timeDue: '',
-          deadlineDate: '',
-          deadlineTime: '',
+          assignedAtDate: completion.assignedDate ? formatDate(completion.assignedDate) : 'N/A',
+          assignedAtTime: completion.assignedTime || (completion.assignedDate ? formatTime(completion.assignedDate) : 'N/A'),
+          dateDue: completion.dueDate ? formatDate(completion.dueDate) : 'N/A',
+          timeDue: completion.dueTime || 'N/A',
+          deadlineDate: completion.deadlineDate ? formatDate(completion.deadlineDate) : 'N/A',
+          deadlineTime: completion.deadlineTime || 'N/A',
           priority: 2,
-          tickedBy: completion.completedByName || '',
-          tickedTime: completion.tickedAt ? `${formatDate(completion.tickedAt)} ${formatTime(completion.tickedAt)}` : '',
+          tickedBy: completion.completedByName || 'N/A',
+          tickedTime: completion.tickedAt ? `${formatDate(completion.tickedAt)} ${formatTime(completion.tickedAt)}` : 'N/A',
           // Add raw date fields for sorting
-          assignedAtDateISO: completion.createdAt ? new Date(completion.createdAt).toISOString() : null,
+          assignedAtDateISO: completion.assignedDate ? new Date(completion.assignedDate).toISOString() : (completion.createdAt ? new Date(completion.createdAt).toISOString() : null),
           tickedAt: completion.tickedAt ? new Date(completion.tickedAt).toISOString() : null,
           completedAt: completion.completedAt ? new Date(completion.completedAt).toISOString() : null,
           createdAt: completion.createdAt ? new Date(completion.createdAt).toISOString() : null,
-          rewardsPoint: 0,
-          rewardsCurrency: 0,
-          penaltyPoint: 0,
-          penaltyCurrency: 0,
-          employeeGot: '',
+          rewardsPoint: bonus,
+          rewardsCurrency: bonusCurrency,
+          penaltyPoint: penalty,
+          penaltyCurrency: penaltyCurrency,
+          employeeGot: employeeGot,
           status: 'completed',
-          approvalStatus: 'completed',
-          approvedBy: '',
+          approvalStatus: completion.approvalStatus || 'approved', // Show status but bonus/fine is auto-applied
+          approvedBy: "N/A",
           deadlinePassed: false,
           customFields: [],
           customFieldValues: {},
           createdByEmployee: false,
-          isHistorical: true,
+          // Only mark as historical if it's a recurring task (one-time tasks are not historical)
+          isHistorical: completion.taskKind !== "one-time", // Historical only for recurring tasks
           isSubtask: true,
           parentTaskTitle: completion.parentTaskTitle,
         };
       })
     );
 
-    const analysisData = [...taskRows, ...subtaskRows, ...completionRows, ...subtaskCompletionRows, ...hackathonRows];
+    // Filter out null entries (tasks from non-active projects)
+    let analysisData = [...taskRows, ...subtaskRows, ...completionRows, ...subtaskCompletionRows, ...hackathonRows].filter((item: any) => item !== null);
 
-    // Sort: pending/new approvals first, then approved ones, both sorted by assigned date (newest first, oldest last)
+    // Sort: by tickedAt/completedAt date (newest first, oldest last)
     analysisData.sort((a: any, b: any) => {
-      // Get approval status
-      const aStatus = a.approvalStatus || "pending";
-      const bStatus = b.approvalStatus || "pending";
-      
-      // Check if approved
-      const aIsApproved = aStatus === "approved";
-      const bIsApproved = bStatus === "approved";
-      
-      // Pending/new approvals come first
-      if (aIsApproved !== bIsApproved) {
-        return aIsApproved ? 1 : -1; // Pending (-1) comes before approved (1)
-      }
-      
-      // Within same group, sort by assigned date (newest first, oldest last)
-      // Use assignedAtDateISO (raw ISO strings) for reliable sorting
-      const getAssignedDate = (item: any): Date => {
-        // Prefer assignedAtDateISO for accurate sorting by assigned date
-        if (item.assignedAtDateISO) {
-          const d = new Date(item.assignedAtDateISO);
-          if (!isNaN(d.getTime())) return d;
-        }
-        // Fallback: Try to parse assignedAtDate string (format: "MM/DD/YYYY")
-        if (item.assignedAtDate && typeof item.assignedAtDate === 'string') {
-          const datePart = item.assignedAtDate.split('/');
-          if (datePart.length === 3) {
-            const date = new Date(
-              parseInt(datePart[2]), // year
-              parseInt(datePart[0]) - 1, // month (0-indexed)
-              parseInt(datePart[1]) // day
-            );
-            if (!isNaN(date.getTime())) {
-              return date;
-            }
-          }
-        }
-        // Fallback to tickedAt, completedAt, or createdAt if assignedAtDate not available
+      // Sort by tickedAt/completedAt date (newest first)
+      const getTickedDate = (item: any): Date => {
+        // Prefer tickedAt for sorting (when task was actually completed)
         if (item.tickedAt) {
           const d = new Date(item.tickedAt);
           if (!isNaN(d.getTime())) return d;
         }
         if (item.completedAt) {
           const d = new Date(item.completedAt);
+          if (!isNaN(d.getTime())) return d;
+        }
+        // Fallback to assignedAtDateISO
+        if (item.assignedAtDateISO) {
+          const d = new Date(item.assignedAtDateISO);
           if (!isNaN(d.getTime())) return d;
         }
         if (item.createdAt) {
@@ -984,16 +1395,82 @@ export async function GET(request: NextRequest) {
         return new Date(0);
       };
       
-      const aDate = getAssignedDate(a);
-      const bDate = getAssignedDate(b);
+      const aDate = getTickedDate(a);
+      const bDate = getTickedDate(b);
       
-      // Sort by assigned date descending (newest first, oldest last)
+      // Sort by ticked date descending (newest first, oldest last)
       return bDate.getTime() - aDate.getTime();
     });
 
+    // Apply filters on server side
+    analysisData = analysisData.filter((task: any) => {
+      // Project filter
+      if (projectFilter !== "all" && task.projectName !== projectFilter) {
+        return false;
+      }
+
+      // Employee filter
+      if (
+        employeeFilter !== "all" &&
+        task.personAssignedTo &&
+        task.personAssignedTo !== employeeFilter
+      ) {
+        return false;
+      }
+
+      // Deadline filter
+      if (deadlineFilter !== "all") {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const todayStr = today.toDateString();
+
+        const deadlineStr = task.deadlineDate || task.dateDue;
+        if (!deadlineStr) {
+          if (deadlineFilter === "no_deadline") return true;
+          return false;
+        }
+
+        try {
+          const d = new Date(deadlineStr);
+          d.setHours(0, 0, 0, 0);
+
+          if (deadlineFilter === "overdue") {
+            return d < today;
+          }
+          if (deadlineFilter === "today") {
+            return d.toDateString() === todayStr;
+          }
+          if (deadlineFilter === "upcoming") {
+            return d > today;
+          }
+          if (deadlineFilter === "no_deadline") {
+            return false; // Already handled above
+          }
+        } catch (e) {
+          // Invalid date, skip this task for deadline filter
+          if (deadlineFilter !== "no_deadline") {
+            return false;
+          }
+        }
+      }
+
+      return true;
+    });
+
+    // Get total count after filtering (before pagination)
+    const total = analysisData.length;
+    
+    // Apply pagination
+    const paginatedData = analysisData.slice(skip, skip + limit);
+
     return NextResponse.json({
       success: true,
-      tasks: analysisData,
+      tasks: paginatedData,
+      total: total,
+      showing: paginatedData.length,
+      page: page,
+      limit: limit,
+      totalPages: Math.ceil(total / limit),
     });
   } catch (error) {
     console.error("Error fetching task analysis:", error);

@@ -6,6 +6,762 @@ import { ObjectId } from "mongodb";
 import DailyUpdate from "@/models/DailyUpdate";
 import ChecklistConfig from "@/models/ChecklistConfig";
 import Task from "@/models/Task";
+import Subtask from "@/models/Subtask";
+import TaskCompletion from "@/models/TaskCompletion";
+import SubtaskCompletion from "@/models/SubtaskCompletion";
+
+// Helper function to parse "What Employee Got" string and extract bonus/fine amounts
+// Examples: "+₹10 Bonus", "-₹50 Fine", "+10 Reward", "-45 Penalty", "0 Points", "Not Completed"
+function parseEmployeeGot(employeeGot: string): { bonusPoints: number; bonusCurrency: number; finePoints: number; fineCurrency: number } {
+  const result = {
+    bonusPoints: 0,
+    bonusCurrency: 0,
+    finePoints: 0,
+    fineCurrency: 0,
+  };
+
+  if (!employeeGot || employeeGot === "Not Completed" || employeeGot === "0 Points") {
+    return result;
+  }
+
+  // Match patterns like: +₹10 Bonus, -₹50 Fine, +10 Reward, -45 Penalty
+  const currencyMatch = employeeGot.match(/[+-]₹(\d+)\s*(Bonus|Fine)/);
+  const pointsMatch = employeeGot.match(/[+-](\d+)\s*(Reward|Penalty)/);
+
+  if (currencyMatch) {
+    const amount = parseFloat(currencyMatch[1]);
+    const type = currencyMatch[2].toLowerCase();
+    if (type === "bonus") {
+      result.bonusCurrency = amount;
+    } else if (type === "fine") {
+      result.fineCurrency = amount;
+    }
+  } else if (pointsMatch) {
+    const amount = parseFloat(pointsMatch[1]);
+    const type = pointsMatch[2].toLowerCase();
+    if (type === "reward") {
+      result.bonusPoints = amount;
+    } else if (type === "penalty") {
+      result.finePoints = amount;
+    }
+  }
+
+  return result;
+}
+
+// Helper function to fetch task analysis data directly from the task analysis API
+// This ensures we use the exact same logic and data as the task analysis page
+async function fetchTaskAnalysisData(startDate: Date, endDate: Date, db: any) {
+  // Import task analysis models
+  const Task = (await import("@/models/Task")).default;
+  const Subtask = (await import("@/models/Subtask")).default;
+  const TaskCompletion = (await import("@/models/TaskCompletion")).default;
+  const SubtaskCompletion = (await import("@/models/SubtaskCompletion")).default;
+  
+  // Reuse the same logic as task analysis API to get all task/subtask entries
+  // This ensures consistency with the task analysis page
+  
+  // Fetch task completions (same query as task analysis)
+  const allTaskCompletions = await TaskCompletion.find({
+    $or: [
+      { tickedAt: { $exists: true, $ne: null } },
+      { notTicked: true, approvalStatus: "deadline_passed" }
+    ]
+  })
+    .sort({ createdAt: -1 })
+    .lean();
+  
+  // Fetch subtask completions
+  const allSubtaskCompletions = await SubtaskCompletion.find({})
+    .sort({ createdAt: -1 })
+    .lean();
+  
+  // Deduplicate (same logic as task analysis)
+  const taskCompletionMap = new Map<string, any>();
+  for (const completion of allTaskCompletions) {
+    if (!completion.taskId) continue;
+    const taskId = completion.taskId.toString();
+    const existing = taskCompletionMap.get(taskId);
+    const completionDate = completion.tickedAt ? new Date(completion.tickedAt) : new Date(completion.createdAt);
+    const existingDate = existing?.tickedAt ? new Date(existing.tickedAt) : (existing?.createdAt ? new Date(existing.createdAt) : null);
+    if (!existing || !existingDate || completionDate > existingDate) {
+      taskCompletionMap.set(taskId, completion);
+    }
+  }
+  
+  const subtaskCompletionMap = new Map<string, any>();
+  for (const completion of allSubtaskCompletions) {
+    if (!completion.subtaskId) continue;
+    const subtaskId = completion.subtaskId.toString();
+    const existing = subtaskCompletionMap.get(subtaskId);
+    const completionDate = completion.tickedAt ? new Date(completion.tickedAt) : new Date(completion.createdAt);
+    const existingDate = existing?.tickedAt ? new Date(existing.tickedAt) : (existing?.createdAt ? new Date(existing.createdAt) : null);
+    if (!existing || !existingDate || completionDate > existingDate) {
+      subtaskCompletionMap.set(subtaskId, completion);
+    }
+  }
+  
+  const tasksWithCompletions = new Set(
+    Array.from(taskCompletionMap.values())
+      .filter((tc: any) => tc.taskId)
+      .map((tc: any) => tc.taskId.toString())
+  );
+  
+  const subtasksWithCompletions = new Set(
+    Array.from(subtaskCompletionMap.values())
+      .filter((sc: any) => sc.subtaskId)
+      .map((sc: any) => sc.subtaskId.toString())
+  );
+  
+  // Fetch active tasks (same as task analysis)
+  const tasks = await Task.find({
+    $or: [
+      { taskKind: { $in: ["daily", "weekly", "monthly"] } },
+      { _id: { $nin: Array.from(tasksWithCompletions).map(id => new ObjectId(id)) } }
+    ],
+    status: "completed",
+    tickedAt: { $exists: true, $ne: null }
+  }).lean();
+  
+  // Fetch active subtasks (same as task analysis)
+  const subtasks = await db.collection("subtasks").find({
+    $or: [
+      { ticked: true },
+      { tickedAt: { $exists: true, $ne: null } }
+    ],
+    _id: { $nin: Array.from(subtasksWithCompletions).map(id => new ObjectId(id)) }
+  }).toArray();
+  
+  const taskAnalysisRows: any[] = [];
+  const usersCollection = db.collection("users");
+  const projectsCollection = db.collection("projects");
+  const tasksCollection = db.collection("tasks");
+  
+  // Batch fetch all task IDs and project IDs for status checks
+  const taskIdsToCheck = Array.from(taskCompletionMap.values())
+    .filter((c: any) => c.taskId)
+    .map((c: any) => c.taskId instanceof ObjectId ? c.taskId : new ObjectId(c.taskId));
+  
+  const projectIdsToCheck = Array.from(taskCompletionMap.values())
+    .filter((c: any) => c.projectId)
+    .map((c: any) => c.projectId instanceof ObjectId ? c.projectId : new ObjectId(c.projectId));
+  
+  // Batch fetch task statuses
+  const tasksStatusMap = new Map<string, any>();
+  if (taskIdsToCheck.length > 0) {
+    const tasks = await tasksCollection.find(
+      { _id: { $in: taskIdsToCheck } },
+      { projection: { _id: 1, status: 1, tickedAt: 1, completedAt: 1 } }
+    ).toArray();
+    for (const task of tasks) {
+      tasksStatusMap.set(task._id.toString(), task);
+    }
+  }
+  
+  // Batch fetch project statuses
+  const projectsStatusMap = new Map<string, string>();
+  if (projectIdsToCheck.length > 0) {
+    const projects = await projectsCollection.find(
+      { _id: { $in: projectIdsToCheck } },
+      { projection: { _id: 1, status: 1 } }
+    ).toArray();
+    for (const project of projects) {
+      projectsStatusMap.set(project._id.toString(), project.status || null);
+    }
+  }
+  
+  // Process task completions - extract employeeGot and date
+  for (const completion of taskCompletionMap.values()) {
+    // Check if task still exists and is ticked (using cached data)
+    if (completion.taskId) {
+      const taskId = completion.taskId.toString();
+      const originalTask = tasksStatusMap.get(taskId);
+      if (!originalTask) continue;
+      
+      const taskStillTicked = !!(originalTask.tickedAt || originalTask.completedAt || originalTask.status === "completed");
+      if (!taskStillTicked) continue;
+    }
+    
+    // Check project status (using cached data)
+    let projectStatus = null;
+    if (completion.projectId) {
+      const projectId = completion.projectId.toString();
+      projectStatus = projectsStatusMap.get(projectId) || null;
+    }
+    
+    if (projectStatus !== "active") continue;
+    
+    // Calculate employeeGot (same as task analysis)
+    const employeeGot = calculateEmployeeGotFromCompletion(completion);
+    const parsed = parseEmployeeGot(employeeGot);
+    
+    // Get employee ID
+    const employeeIds = new Set<string>();
+    if (Array.isArray(completion.assignees) && completion.assignees.length > 0) {
+      for (const id of completion.assignees) {
+        if (id) employeeIds.add(id.toString());
+      }
+    } else if (completion.assignedTo) {
+      employeeIds.add(completion.assignedTo.toString());
+    } else if (completion.completedBy) {
+      employeeIds.add(completion.completedBy.toString());
+    }
+    
+    // Determine date for attribution
+    let completionDate: Date | null = null;
+    if (completion.approvalStatus === "deadline_passed") {
+      if (completion.deadlineDate) {
+        completionDate = new Date(completion.deadlineDate);
+      } else if (completion.assignedDate) {
+        completionDate = new Date(completion.assignedDate);
+      } else {
+        completionDate = completion.tickedAt ? new Date(completion.tickedAt) : new Date(completion.createdAt);
+      }
+    } else {
+      completionDate = completion.tickedAt ? new Date(completion.tickedAt) : (completion.completedAt ? new Date(completion.completedAt) : new Date(completion.createdAt));
+    }
+    
+    // Normalize dates for comparison
+    const completionDateNormalized = new Date(completionDate);
+    completionDateNormalized.setHours(0, 0, 0, 0);
+    const startDateNormalized = new Date(startDate);
+    startDateNormalized.setHours(0, 0, 0, 0);
+    const endDateNormalized = new Date(endDate);
+    endDateNormalized.setHours(23, 59, 59, 999);
+    
+    if (completionDateNormalized < startDateNormalized || completionDateNormalized > endDateNormalized) {
+      continue;
+    }
+    
+    for (const empId of employeeIds) {
+      taskAnalysisRows.push({
+        employeeId: empId,
+        date: completionDate,
+        bonusPoints: parsed.bonusPoints,
+        bonusCurrency: parsed.bonusCurrency,
+        finePoints: parsed.finePoints,
+        fineCurrency: parsed.fineCurrency,
+        rewardTotal: completion.bonusPoints || 0,
+        rewardTotalCurrency: completion.bonusCurrency || 0,
+      });
+    }
+  }
+  
+  // Batch fetch subtask IDs and parent task IDs for status checks
+  const subtaskIdsToCheck = Array.from(subtaskCompletionMap.values())
+    .filter((c: any) => c.subtaskId)
+    .map((c: any) => c.subtaskId instanceof ObjectId ? c.subtaskId : new ObjectId(c.subtaskId));
+  
+  const parentTaskIdsToCheck = Array.from(subtaskCompletionMap.values())
+    .filter((c: any) => c.taskId)
+    .map((c: any) => c.taskId instanceof ObjectId ? c.taskId : new ObjectId(c.taskId));
+  
+  // Batch fetch subtask statuses
+  const subtasksStatusMap = new Map<string, any>();
+  if (subtaskIdsToCheck.length > 0) {
+    const subtasks = await db.collection("subtasks").find(
+      { _id: { $in: subtaskIdsToCheck } },
+      { projection: { _id: 1, status: 1, tickedAt: 1, completedAt: 1, ticked: 1 } }
+    ).toArray();
+    for (const subtask of subtasks) {
+      subtasksStatusMap.set(subtask._id.toString(), subtask);
+    }
+  }
+  
+  // Batch fetch parent tasks to get project IDs
+  const parentTasksMap = new Map<string, any>();
+  if (parentTaskIdsToCheck.length > 0) {
+    const parentTasks = await tasksCollection.find(
+      { _id: { $in: parentTaskIdsToCheck } },
+      { projection: { _id: 1, projectId: 1 } }
+    ).toArray();
+    for (const task of parentTasks) {
+      parentTasksMap.set(task._id.toString(), task);
+    }
+  }
+  
+  // Get all unique project IDs from subtask completions
+  const subtaskProjectIds = new Set<string>();
+  for (const completion of subtaskCompletionMap.values()) {
+    if (completion.projectId) {
+      subtaskProjectIds.add(completion.projectId.toString());
+    } else if (completion.taskId) {
+      const parentTask = parentTasksMap.get(completion.taskId.toString());
+      if (parentTask && parentTask.projectId) {
+        subtaskProjectIds.add(parentTask.projectId.toString());
+      }
+    }
+  }
+  
+  // Batch fetch project statuses for subtasks
+  const subtaskProjectsStatusMap = new Map<string, string>();
+  if (subtaskProjectIds.size > 0) {
+    const subtaskProjects = await projectsCollection.find(
+      { _id: { $in: Array.from(subtaskProjectIds).map(id => new ObjectId(id)) } },
+      { projection: { _id: 1, status: 1 } }
+    ).toArray();
+    for (const project of subtaskProjects) {
+      subtaskProjectsStatusMap.set(project._id.toString(), project.status || null);
+    }
+  }
+  
+  // Process subtask completions
+  for (const completion of subtaskCompletionMap.values()) {
+    // Check if subtask still exists and is ticked (using cached data)
+    if (completion.subtaskId) {
+      const subtaskId = completion.subtaskId.toString();
+      const originalSubtask = subtasksStatusMap.get(subtaskId);
+      if (!originalSubtask) continue;
+      
+      const subtaskStillTicked = !!(originalSubtask.tickedAt || originalSubtask.completedAt || originalSubtask.ticked === true || originalSubtask.status === "completed");
+      if (!subtaskStillTicked) continue;
+    }
+    
+    // Check project status (using cached data)
+    let projectStatus = null;
+    if (completion.projectId) {
+      const projectId = completion.projectId.toString();
+      projectStatus = subtaskProjectsStatusMap.get(projectId) || null;
+    } else if (completion.taskId) {
+      const parentTask = parentTasksMap.get(completion.taskId.toString());
+      if (parentTask && parentTask.projectId) {
+        const projectId = parentTask.projectId.toString();
+        projectStatus = subtaskProjectsStatusMap.get(projectId) || null;
+      }
+    }
+    
+    if (projectStatus !== "active") continue;
+    
+    const employeeGot = calculateEmployeeGotFromSubtaskCompletion(completion);
+    const parsed = parseEmployeeGot(employeeGot);
+    
+    const employeeIds = new Set<string>();
+    if (Array.isArray(completion.assignees) && completion.assignees.length > 0) {
+      for (const id of completion.assignees) {
+        if (id) employeeIds.add(id.toString());
+      }
+    } else if (completion.completedBy) {
+      employeeIds.add(completion.completedBy.toString());
+    }
+    
+    let completionDate: Date | null = null;
+    if (completion.approvalStatus === "deadline_passed") {
+      if (completion.deadlineDate) {
+        completionDate = new Date(completion.deadlineDate);
+      } else if (completion.createdAt) {
+        completionDate = new Date(completion.createdAt);
+      } else {
+        completionDate = completion.tickedAt ? new Date(completion.tickedAt) : new Date(completion.createdAt);
+      }
+    } else {
+      completionDate = completion.tickedAt ? new Date(completion.tickedAt) : (completion.completedAt ? new Date(completion.completedAt) : new Date(completion.createdAt));
+    }
+    
+    // Normalize dates for comparison
+    const completionDateNormalized = new Date(completionDate);
+    completionDateNormalized.setHours(0, 0, 0, 0);
+    const startDateNormalized = new Date(startDate);
+    startDateNormalized.setHours(0, 0, 0, 0);
+    const endDateNormalized = new Date(endDate);
+    endDateNormalized.setHours(23, 59, 59, 999);
+    
+    if (completionDateNormalized < startDateNormalized || completionDateNormalized > endDateNormalized) {
+      continue;
+    }
+    
+    for (const empId of employeeIds) {
+      taskAnalysisRows.push({
+        employeeId: empId,
+        date: completionDate,
+        bonusPoints: parsed.bonusPoints,
+        bonusCurrency: parsed.bonusCurrency,
+        finePoints: parsed.finePoints,
+        fineCurrency: parsed.fineCurrency,
+        rewardTotal: completion.bonusPoints || 0,
+        rewardTotalCurrency: completion.bonusCurrency || 0,
+      });
+    }
+  }
+  
+  // Batch fetch project statuses for active tasks
+  const activeTaskProjectIds = tasks
+    .filter((t: any) => t.projectId)
+    .map((t: any) => t.projectId instanceof ObjectId ? t.projectId : new ObjectId(t.projectId));
+  
+  const activeTaskProjectsStatusMap = new Map<string, string>();
+  if (activeTaskProjectIds.length > 0) {
+    const activeTaskProjects = await projectsCollection.find(
+      { _id: { $in: activeTaskProjectIds } },
+      { projection: { _id: 1, status: 1 } }
+    ).toArray();
+    for (const project of activeTaskProjects) {
+      activeTaskProjectsStatusMap.set(project._id.toString(), project.status || null);
+    }
+  }
+  
+  // Process active tasks (only ticked ones)
+  for (const task of tasks) {
+    // Check project status (using cached data)
+    const projectId = task.projectId?.toString();
+    const projectStatus = projectId ? (activeTaskProjectsStatusMap.get(projectId) || null) : null;
+    
+    if (projectStatus !== "active") continue;
+    
+    const employeeGot = calculateEmployeeGotFromTask(task);
+    const parsed = parseEmployeeGot(employeeGot);
+    
+    const employeeIds = new Set<string>();
+    if (Array.isArray(task.assignees) && task.assignees.length > 0) {
+      for (const id of task.assignees) {
+        if (id) employeeIds.add(id.toString());
+      }
+    } else if (task.assignedTo) {
+      employeeIds.add(task.assignedTo.toString());
+    }
+    
+    if (employeeIds.size === 0) continue;
+    
+    // Determine date for attribution
+    let baseDate: Date | null = null;
+    const approvalStatus = task.approvalStatus || "pending";
+    
+    if (approvalStatus === "approved" && task.status === "completed" && task.tickedAt) {
+      baseDate = task.tickedAt ? new Date(task.tickedAt) : (task.completedAt ? new Date(task.completedAt) : new Date(task.createdAt));
+    } else if (approvalStatus === "deadline_passed") {
+      if (task.deadlineDate) {
+        baseDate = new Date(task.deadlineDate);
+      } else if (task.assignedDate) {
+        baseDate = new Date(task.assignedDate);
+      } else {
+        baseDate = new Date(task.createdAt);
+      }
+    } else {
+      baseDate = task.assignedDate ? new Date(task.assignedDate) : new Date(task.createdAt);
+    }
+    
+    // Normalize dates for comparison
+    if (!baseDate) continue;
+    const baseDateNormalized = new Date(baseDate);
+    baseDateNormalized.setHours(0, 0, 0, 0);
+    const startDateNormalized = new Date(startDate);
+    startDateNormalized.setHours(0, 0, 0, 0);
+    const endDateNormalized = new Date(endDate);
+    endDateNormalized.setHours(23, 59, 59, 999);
+    
+    if (baseDateNormalized < startDateNormalized || baseDateNormalized > endDateNormalized) {
+      continue;
+    }
+    
+    for (const empId of employeeIds) {
+      taskAnalysisRows.push({
+        employeeId: empId,
+        date: baseDate,
+        bonusPoints: parsed.bonusPoints,
+        bonusCurrency: parsed.bonusCurrency,
+        finePoints: parsed.finePoints,
+        fineCurrency: parsed.fineCurrency,
+        rewardTotal: task.bonusPoints || 0,
+        rewardTotalCurrency: task.bonusCurrency || 0,
+      });
+    }
+  }
+  
+  // Batch fetch parent tasks for active subtasks
+  const activeSubtaskTaskIds = subtasks
+    .filter((s: any) => s.taskId)
+    .map((s: any) => s.taskId instanceof ObjectId ? s.taskId : new ObjectId(s.taskId));
+  
+  const activeSubtaskParentTasksMap = new Map<string, any>();
+  if (activeSubtaskTaskIds.length > 0) {
+    const activeSubtaskParentTasks = await tasksCollection.find(
+      { _id: { $in: activeSubtaskTaskIds } },
+      { projection: { _id: 1, projectId: 1 } }
+    ).toArray();
+    for (const task of activeSubtaskParentTasks) {
+      activeSubtaskParentTasksMap.set(task._id.toString(), task);
+    }
+  }
+  
+  // Get all unique project IDs from active subtasks
+  const activeSubtaskProjectIds = new Set<string>();
+  for (const subtask of subtasks) {
+    if (subtask.taskId) {
+      const parentTask = activeSubtaskParentTasksMap.get(subtask.taskId.toString());
+      if (parentTask && parentTask.projectId) {
+        activeSubtaskProjectIds.add(parentTask.projectId.toString());
+      }
+    }
+  }
+  
+  // Batch fetch project statuses for active subtasks
+  const activeSubtaskProjectsStatusMap = new Map<string, string>();
+  if (activeSubtaskProjectIds.size > 0) {
+    const activeSubtaskProjects = await projectsCollection.find(
+      { _id: { $in: Array.from(activeSubtaskProjectIds).map(id => new ObjectId(id)) } },
+      { projection: { _id: 1, status: 1 } }
+    ).toArray();
+    for (const project of activeSubtaskProjects) {
+      activeSubtaskProjectsStatusMap.set(project._id.toString(), project.status || null);
+    }
+  }
+  
+  // Process active subtasks (only ticked ones)
+  for (const subtask of subtasks) {
+    // Check project status (using cached data)
+    let projectStatus = null;
+    if (subtask.taskId) {
+      const parentTask = activeSubtaskParentTasksMap.get(subtask.taskId.toString());
+      if (parentTask && parentTask.projectId) {
+        const projectId = parentTask.projectId.toString();
+        projectStatus = activeSubtaskProjectsStatusMap.get(projectId) || null;
+      }
+    }
+    
+    if (projectStatus !== "active") continue;
+    
+    const employeeGot = calculateEmployeeGotFromSubtask(subtask);
+    const parsed = parseEmployeeGot(employeeGot);
+    
+    if (!subtask.assignee) continue;
+    const employeeId = subtask.assignee.toString();
+    
+    let baseDate: Date | null = null;
+    const approvalStatus = subtask.approvalStatus || "pending";
+    
+    if (approvalStatus === "approved" && subtask.status === "completed" && subtask.tickedAt) {
+      baseDate = subtask.tickedAt ? new Date(subtask.tickedAt) : (subtask.completedAt ? new Date(subtask.completedAt) : new Date(subtask.createdAt));
+    } else if (approvalStatus === "deadline_passed") {
+      if (subtask.deadlineDate) {
+        baseDate = new Date(subtask.deadlineDate);
+      } else if (subtask.createdAt) {
+        baseDate = new Date(subtask.createdAt);
+      }
+    } else {
+      baseDate = subtask.createdAt ? new Date(subtask.createdAt) : new Date();
+    }
+    
+    // Normalize dates for comparison
+    if (!baseDate) continue;
+    const baseDateNormalized = new Date(baseDate);
+    baseDateNormalized.setHours(0, 0, 0, 0);
+    const startDateNormalized = new Date(startDate);
+    startDateNormalized.setHours(0, 0, 0, 0);
+    const endDateNormalized = new Date(endDate);
+    endDateNormalized.setHours(23, 59, 59, 999);
+    
+    if (baseDateNormalized < startDateNormalized || baseDateNormalized > endDateNormalized) {
+      continue;
+    }
+    
+    taskAnalysisRows.push({
+      employeeId: employeeId,
+      date: baseDate,
+      bonusPoints: parsed.bonusPoints,
+      bonusCurrency: parsed.bonusCurrency,
+      finePoints: parsed.finePoints,
+      fineCurrency: parsed.fineCurrency,
+      rewardTotal: subtask.bonusPoints || 0,
+      rewardTotalCurrency: subtask.bonusCurrency || 0,
+    });
+  }
+  
+  return taskAnalysisRows;
+}
+
+// Helper to calculate employeeGot from TaskCompletion (similar to task analysis route)
+function calculateEmployeeGotFromCompletion(completion: any): string {
+  if (completion.approvalStatus === "approved") {
+    // Check if completed late
+    let deadlineDate: Date | null = null;
+    if (completion.deadlineDate) {
+      deadlineDate = new Date(completion.deadlineDate);
+      if (completion.deadlineTime) {
+        const [h, m] = completion.deadlineTime.split(":");
+        deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+      } else {
+        deadlineDate.setHours(23, 59, 59, 999);
+      }
+    }
+    
+    const completedAt = completion.tickedAt || completion.completedAt;
+    if (deadlineDate && completedAt && new Date(completedAt) > deadlineDate) {
+      // Late - apply fine
+      if (completion.penaltyCurrency && completion.penaltyCurrency > 0) {
+        return `-₹${completion.penaltyCurrency} Fine`;
+      } else if (completion.penaltyPoints && completion.penaltyPoints > 0) {
+        return `-${completion.penaltyPoints} Penalty`;
+      }
+      return "0 Points";
+    } else {
+      // On time - apply bonus
+      if (completion.bonusCurrency && completion.bonusCurrency > 0) {
+        return `+₹${completion.bonusCurrency} Bonus`;
+      } else if (completion.bonusPoints && completion.bonusPoints > 0) {
+        return `+${completion.bonusPoints} Reward`;
+      }
+      return "0 Points";
+    }
+  } else if (completion.approvalStatus === "deadline_passed" || completion.approvalStatus === "rejected") {
+    // Apply fine
+    if (completion.penaltyCurrency && completion.penaltyCurrency > 0) {
+      return `-₹${completion.penaltyCurrency} Fine`;
+    } else if (completion.penaltyPoints && completion.penaltyPoints > 0) {
+      return `-${completion.penaltyPoints} Penalty`;
+    }
+    return "0 Points";
+  }
+  return "Not Completed";
+}
+
+// Helper to calculate employeeGot from SubtaskCompletion
+function calculateEmployeeGotFromSubtaskCompletion(completion: any): string {
+  // Similar logic to TaskCompletion
+  if (completion.approvalStatus === "approved") {
+    let deadlineDate: Date | null = null;
+    if (completion.deadlineDate) {
+      deadlineDate = new Date(completion.deadlineDate);
+      if (completion.deadlineTime) {
+        const [h, m] = completion.deadlineTime.split(":");
+        deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+      } else {
+        deadlineDate.setHours(23, 59, 59, 999);
+      }
+    }
+    
+    const completedAt = completion.tickedAt || completion.completedAt;
+    if (deadlineDate && completedAt && new Date(completedAt) > deadlineDate) {
+      if (completion.penaltyCurrency && completion.penaltyCurrency > 0) {
+        return `-₹${completion.penaltyCurrency} Fine`;
+      } else if (completion.penaltyPoints && completion.penaltyPoints > 0) {
+        return `-${completion.penaltyPoints} Penalty`;
+      }
+      return "0 Points";
+    } else {
+      if (completion.bonusCurrency && completion.bonusCurrency > 0) {
+        return `+₹${completion.bonusCurrency} Bonus`;
+      } else if (completion.bonusPoints && completion.bonusPoints > 0) {
+        return `+${completion.bonusPoints} Reward`;
+      }
+      return "0 Points";
+    }
+  } else if (completion.approvalStatus === "deadline_passed" || completion.approvalStatus === "rejected") {
+    if (completion.penaltyCurrency && completion.penaltyCurrency > 0) {
+      return `-₹${completion.penaltyCurrency} Fine`;
+    } else if (completion.penaltyPoints && completion.penaltyPoints > 0) {
+      return `-${completion.penaltyPoints} Penalty`;
+    }
+    return "0 Points";
+  }
+  return "Not Completed";
+}
+
+// Helper to calculate employeeGot from Task
+function calculateEmployeeGotFromTask(task: any): string {
+  const now = new Date();
+  let deadlineDate: Date | null = null;
+  let deadlinePassed = false;
+  
+  if (task.deadlineTime) {
+    const isRecurring = ["daily", "weekly", "monthly"].includes(task.taskKind);
+    if (isRecurring && task.assignedDate) {
+      deadlineDate = new Date(task.assignedDate);
+      deadlineDate.setHours(0, 0, 0, 0);
+    } else if (task.deadlineDate) {
+      deadlineDate = new Date(task.deadlineDate);
+      deadlineDate.setHours(0, 0, 0, 0);
+    }
+    
+    if (deadlineDate) {
+      const [h, m] = task.deadlineTime.split(":");
+      deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+      deadlinePassed = now > deadlineDate;
+    }
+  } else if (task.deadlineDate) {
+    deadlineDate = new Date(task.deadlineDate);
+    deadlineDate.setHours(23, 59, 59, 999);
+    deadlinePassed = now > deadlineDate;
+  }
+  
+  if (task.status === "completed" && task.tickedAt) {
+    const completedAt = task.tickedAt || task.completedAt || now;
+    if (deadlineDate && completedAt > deadlineDate) {
+      // Late
+      if (task.penaltyCurrency && task.penaltyCurrency > 0) {
+        return `-₹${task.penaltyCurrency} Fine`;
+      } else if (task.penaltyPoints && task.penaltyPoints > 0) {
+        return `-${task.penaltyPoints} Penalty`;
+      }
+      return "0 Points";
+    } else {
+      // On time
+      if (task.bonusCurrency && task.bonusCurrency > 0) {
+        return `+₹${task.bonusCurrency} Bonus`;
+      } else if (task.bonusPoints && task.bonusPoints > 0) {
+        return `+${task.bonusPoints} Reward`;
+      }
+      return "0 Points";
+    }
+  } else if (deadlinePassed && task.status !== "completed") {
+    // Deadline passed, not completed
+    if (task.penaltyCurrency && task.penaltyCurrency > 0) {
+      return `-₹${task.penaltyCurrency} Fine`;
+    } else if (task.penaltyPoints && task.penaltyPoints > 0) {
+      return `-${task.penaltyPoints} Penalty`;
+    }
+    return "0 Points";
+  }
+  return "Not Completed";
+}
+
+// Helper to calculate employeeGot from Subtask
+function calculateEmployeeGotFromSubtask(subtask: any): string {
+  // Similar to task, but subtasks inherit from parent
+  // For now, use subtask's own values (they should be inherited from parent)
+  const now = new Date();
+  let deadlineDate: Date | null = null;
+  let deadlinePassed = false;
+  
+  // Get parent task deadline
+  // For simplicity, use subtask's deadline if available
+  if (subtask.deadlineTime) {
+    if (subtask.deadlineDate) {
+      deadlineDate = new Date(subtask.deadlineDate);
+      deadlineDate.setHours(0, 0, 0, 0);
+    }
+    if (deadlineDate) {
+      const [h, m] = subtask.deadlineTime.split(":");
+      deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+      deadlinePassed = now > deadlineDate;
+    }
+  }
+  
+  if (subtask.status === "completed" && subtask.tickedAt) {
+    const completedAt = subtask.tickedAt || subtask.completedAt || now;
+    if (deadlineDate && completedAt > deadlineDate) {
+      if (subtask.penaltyCurrency && subtask.penaltyCurrency > 0) {
+        return `-₹${subtask.penaltyCurrency} Fine`;
+      } else if (subtask.penaltyPoints && subtask.penaltyPoints > 0) {
+        return `-${subtask.penaltyPoints} Penalty`;
+      }
+      return "0 Points";
+    } else {
+      if (subtask.bonusCurrency && subtask.bonusCurrency > 0) {
+        return `+₹${subtask.bonusCurrency} Bonus`;
+      } else if (subtask.bonusPoints && subtask.bonusPoints > 0) {
+        return `+${subtask.bonusPoints} Reward`;
+      }
+      return "0 Points";
+    }
+  } else if (deadlinePassed && subtask.status !== "completed") {
+    if (subtask.penaltyCurrency && subtask.penaltyCurrency > 0) {
+      return `-₹${subtask.penaltyCurrency} Fine`;
+    } else if (subtask.penaltyPoints && subtask.penaltyPoints > 0) {
+      return `-${subtask.penaltyPoints} Penalty`;
+    }
+    return "0 Points";
+  }
+  return "Not Completed";
+}
 
 type SummaryRow = {
   employeeId: string;
@@ -361,14 +1117,48 @@ export async function GET(request: NextRequest) {
     }
 
     // ----------------------------
-    // 2) Task-based Rewards/Fines
+    // 2) Task-based Rewards/Fines (from Task Analysis)
     // ----------------------------
-    // Query all tasks - we'll filter by penalty/reward event date later
-    // This ensures we don't miss tasks where the penalty event occurred in the period
-    // even if the task was created/completed outside the period
-    const tasks = await Task.find({}).lean();
+    // Fetch all task analysis data to get accurate "What Employee Got" values
+    // This ensures we use the same calculation logic as the task analysis page
+    const taskAnalysisData = await fetchTaskAnalysisData(startDate, endDate, db);
+    
+    // Process task analysis data and aggregate by employee and date
+    for (const taskData of taskAnalysisData) {
+      const dateKey = toDateKey(taskData.date);
+      const row = getOrCreateRow(taskData.employeeId, dateKey);
+      
+      // Add to total potential reward
+      row.taskRewardTotal += taskData.rewardTotal || 0;
+      row.taskRewardTotalCurrency += taskData.rewardTotalCurrency || 0;
+      
+      // Add earned bonuses (from employeeGot parsing)
+      if (taskData.bonusPoints > 0) {
+        row.taskEarned += taskData.bonusPoints;
+      }
+      if (taskData.bonusCurrency > 0) {
+        row.taskEarnedCurrency += taskData.bonusCurrency;
+      }
+      
+      // Add fines (from employeeGot parsing)
+      if (taskData.finePoints > 0) {
+        row.taskFine += taskData.finePoints;
+      }
+      if (taskData.fineCurrency > 0) {
+        row.taskFineCurrency += taskData.fineCurrency;
+      }
+    }
 
-    for (const task of tasks as any[]) {
+    // OLD TASK CALCULATION LOGIC REMOVED - Now using task analysis data above
+    // Subtask processing is now included in fetchTaskAnalysisData above
+    // All old task/subtask calculation logic has been moved to fetchTaskAnalysisData function above
+    
+    /* REMOVED: Old task and subtask calculation logic - now handled in fetchTaskAnalysisData
+      // Skip tasks that have been moved to TaskCompletion to avoid double counting
+      if (completedTaskIds.has(task._id.toString())) {
+        continue;
+      }
+      
       const bonus = typeof task.bonusPoints === "number" ? task.bonusPoints : 0;
       const bonusCurrency = typeof task.bonusCurrency === "number" ? task.bonusCurrency : 0;
       let penalty =
@@ -406,6 +1196,26 @@ export async function GET(request: NextRequest) {
       // Skip tasks marked as not applicable - they don't contribute to bonus/penalty
       const taskAny = task as any;
       if (taskAny.notApplicable === true) {
+        continue;
+      }
+
+      // Check project status - only process tasks from "active" projects
+      let projectStatus = null;
+      try {
+        const project = await db.collection("projects").findOne(
+          { _id: task.projectId instanceof ObjectId ? task.projectId : new ObjectId(task.projectId) },
+          { projection: { status: 1 } }
+        );
+        if (project) {
+          projectStatus = project.status || null;
+        }
+      } catch (e) {
+        // Couldn't fetch project status, skip this task
+        continue;
+      }
+
+      // Skip tasks from projects that are not "active"
+      if (projectStatus !== "active") {
         continue;
       }
 
@@ -558,27 +1368,27 @@ export async function GET(request: NextRequest) {
           
           // For deadline_passed status, determine when the deadline actually passed
           if (approvalStatus === "deadline_passed") {
-            // Calculate the deadline date that passed
+            // Calculate the actual deadline date that passed - this is when the fine should be attributed
             let deadlinePassedDate: Date | null = null;
             
             if (task.deadlineTime) {
-              // For recurring tasks, use today's date if deadlineTime exists
-              if (isRecurring) {
-                const today = new Date();
-                today.setHours(0, 0, 0, 0);
-                deadlinePassedDate = task.deadlineDate ? new Date(task.deadlineDate) : today;
+              // For recurring tasks, use assigned date as the deadline date
+              if (isRecurring && task.assignedDate) {
+                deadlinePassedDate = new Date(task.assignedDate);
                 deadlinePassedDate.setHours(0, 0, 0, 0);
               } else if (task.deadlineDate) {
                 deadlinePassedDate = new Date(task.deadlineDate);
                 deadlinePassedDate.setHours(0, 0, 0, 0);
-              } else {
-                deadlinePassedDate = new Date();
+              } else if (task.assignedDate) {
+                deadlinePassedDate = new Date(task.assignedDate);
                 deadlinePassedDate.setHours(0, 0, 0, 0);
               }
               
-              // Parse deadline time
-              const [h, m] = task.deadlineTime.split(":");
-              deadlinePassedDate.setHours(parseInt(h), parseInt(m), 0, 0);
+              if (deadlinePassedDate) {
+                // Parse deadline time
+                const [h, m] = task.deadlineTime.split(":");
+                deadlinePassedDate.setHours(parseInt(h), parseInt(m), 0, 0);
+              }
             } else if (task.deadlineDate) {
               deadlinePassedDate = new Date(task.deadlineDate);
               deadlinePassedDate.setHours(23, 59, 59, 999);
@@ -592,10 +1402,10 @@ export async function GET(request: NextRequest) {
               }
             }
             
-            // Use the deadline date that passed, or fallback to approval/update date
+            // Use the deadline date that passed as baseDate
             if (deadlinePassedDate) {
               baseDate = deadlinePassedDate;
-              // Normalize dates for comparison (compare dates, not times)
+              // Normalize the deadline date for comparison
               const deadlineDateNormalized = new Date(deadlinePassedDate);
               deadlineDateNormalized.setHours(0, 0, 0, 0);
               const startDateNormalized = new Date(startDate);
@@ -603,16 +1413,22 @@ export async function GET(request: NextRequest) {
               const endDateNormalized = new Date(endDate);
               endDateNormalized.setHours(23, 59, 59, 999);
               
-              // Check if this deadline date is within the selected period
+              // Check if the deadline date is within the selected period
               if (deadlineDateNormalized >= startDateNormalized && deadlineDateNormalized <= endDateNormalized) {
                 penaltyEventInPeriod = true;
               }
             } else {
-              // Fallback to approval/update date if we can't determine deadline
-              baseDate = task.approvedAt || task.updatedAt || task.createdAt;
+              // Fallback to assigned date if we can't determine deadline
+              baseDate = task.assignedDate || task.createdAt;
               if (baseDate) {
-                const approvedDate = new Date(baseDate);
-                if (approvedDate >= startDate && approvedDate <= endDate) {
+                const assignedDateNormalized = new Date(baseDate);
+                assignedDateNormalized.setHours(0, 0, 0, 0);
+                const startDateNormalized = new Date(startDate);
+                startDateNormalized.setHours(0, 0, 0, 0);
+                const endDateNormalized = new Date(endDate);
+                endDateNormalized.setHours(23, 59, 59, 999);
+                
+                if (assignedDateNormalized >= startDateNormalized && assignedDateNormalized <= endDateNormalized) {
                   penaltyEventInPeriod = true;
                 }
               }
@@ -680,21 +1496,376 @@ export async function GET(request: NextRequest) {
     }
 
     // ----------------------------
+    // 2.3) Subtask-based Rewards/Fines (inherited from parent task)
+    // ----------------------------
+    const subtasks = await Subtask.find({}).lean();
+    
+    // Get all subtask IDs that have SubtaskCompletion records to avoid double counting
+    const SubtaskCompletion = (await import("@/models/SubtaskCompletion")).default;
+    const completedSubtaskIds = new Set<string>();
+    const existingSubtaskCompletions = await SubtaskCompletion.find({}).select('subtaskId').lean();
+    for (const comp of existingSubtaskCompletions as any[]) {
+      if (comp.subtaskId) {
+        completedSubtaskIds.add(comp.subtaskId.toString());
+      }
+    }
+
+    for (const subtask of subtasks as any[]) {
+      // Skip subtasks that have been moved to SubtaskCompletion to avoid double counting
+      if (completedSubtaskIds.has(subtask._id.toString())) {
+        continue;
+      }
+      
+      const bonus = typeof subtask.bonusPoints === "number" ? subtask.bonusPoints : 0;
+      const bonusCurrency = typeof subtask.bonusCurrency === "number" ? subtask.bonusCurrency : 0;
+      let penalty = typeof subtask.penaltyPoints === "number" ? subtask.penaltyPoints : 0;
+      let penaltyCurrency = typeof subtask.penaltyCurrency === "number" ? subtask.penaltyCurrency : 0;
+      
+      // If penaltyCurrency is 0 but penaltyPoints exists, use penaltyPoints as fallback
+      if (penaltyCurrency <= 0 && penalty > 0) {
+        penaltyCurrency = penalty;
+      }
+
+      // Subtasks have a single assignee
+      if (!subtask.assignee) continue;
+      const employeeId = subtask.assignee.toString();
+
+      // Skip subtasks marked as not applicable
+      if (subtask.notApplicable === true) {
+        continue;
+      }
+
+      // Check project status for subtask - need to get parent task first
+      let projectStatus = null;
+      try {
+        const parentTask = await db.collection("tasks").findOne(
+          { _id: subtask.taskId instanceof ObjectId ? subtask.taskId : new ObjectId(subtask.taskId) },
+          { projection: { projectId: 1 } }
+        );
+        if (parentTask && parentTask.projectId) {
+          const project = await db.collection("projects").findOne(
+            { _id: parentTask.projectId instanceof ObjectId ? parentTask.projectId : new ObjectId(parentTask.projectId) },
+            { projection: { status: 1 } }
+          );
+          if (project) {
+            projectStatus = project.status || null;
+          }
+        }
+      } catch (e) {
+        // Couldn't fetch project status, skip this subtask
+        continue;
+      }
+
+      // Skip subtasks from projects that are not "active"
+      if (projectStatus !== "active") {
+        continue;
+      }
+
+      const approvalStatus: string = subtask.approvalStatus || "pending";
+      const nowLocal = new Date();
+
+      // For recurring subtasks, use assigned date for deadlineDate if deadlineTime exists
+      const isRecurring = ["daily", "weekly", "monthly"].includes(subtask.taskKind);
+      
+      let baseDate: Date | null = null;
+      let penaltyEventInPeriod = false;
+      let rewardEventInPeriod = false;
+      let shouldGetPenalty = false;
+      let shouldGetReward = false;
+      
+      if (approvalStatus === "approved") {
+        if (subtask.status === "completed") {
+          let deadlineDate: Date | null = null;
+
+          if (subtask.deadlineTime) {
+            // For recurring subtasks, use created date (similar to assigned date for tasks)
+            if (isRecurring && subtask.createdAt) {
+              deadlineDate = new Date(subtask.createdAt);
+              deadlineDate.setHours(0, 0, 0, 0);
+            } else if (subtask.deadlineDate) {
+              deadlineDate = new Date(subtask.deadlineDate);
+              deadlineDate.setHours(0, 0, 0, 0);
+            } else {
+              deadlineDate = new Date();
+              deadlineDate.setHours(0, 0, 0, 0);
+            }
+            
+            // Parse deadline time
+            const [h, m] = subtask.deadlineTime.split(":");
+            deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+          } else if (subtask.deadlineDate) {
+            deadlineDate = new Date(subtask.deadlineDate);
+            deadlineDate.setHours(23, 59, 59, 999);
+          } else if (subtask.dueDate) {
+            deadlineDate = new Date(subtask.dueDate);
+            if (subtask.dueTime) {
+              const [h, m] = subtask.dueTime.split(":");
+              deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+            } else {
+              deadlineDate.setHours(23, 59, 59, 999);
+            }
+          }
+
+          const completedAt = subtask.tickedAt || subtask.completedAt || subtask.updatedAt || nowLocal;
+
+          if (deadlineDate && completedAt > deadlineDate) {
+            shouldGetPenalty = true;
+            baseDate = completedAt;
+            const completedDate = new Date(completedAt);
+            const deadlineDateObj = deadlineDate;
+            
+            const completedDateNormalized = new Date(completedDate);
+            completedDateNormalized.setHours(0, 0, 0, 0);
+            const deadlineDateNormalized = new Date(deadlineDateObj);
+            deadlineDateNormalized.setHours(0, 0, 0, 0);
+            const startDateNormalized = new Date(startDate);
+            startDateNormalized.setHours(0, 0, 0, 0);
+            const endDateNormalized = new Date(endDate);
+            endDateNormalized.setHours(23, 59, 59, 999);
+            
+            if ((completedDateNormalized >= startDateNormalized && completedDateNormalized <= endDateNormalized) ||
+                (deadlineDateNormalized >= startDateNormalized && deadlineDateNormalized <= endDateNormalized)) {
+              penaltyEventInPeriod = true;
+            }
+          } else if (bonus > 0 || bonusCurrency > 0) {
+            shouldGetReward = true;
+            baseDate = completedAt;
+            const completedDate = new Date(completedAt);
+            completedDate.setHours(0, 0, 0, 0);
+            const startDateNormalized = new Date(startDate);
+            startDateNormalized.setHours(0, 0, 0, 0);
+            const endDateNormalized = new Date(endDate);
+            endDateNormalized.setHours(23, 59, 59, 999);
+            if (completedDate >= startDateNormalized && completedDate <= endDateNormalized) {
+              rewardEventInPeriod = true;
+            }
+          }
+          
+          if (!baseDate) {
+            baseDate = subtask.createdAt;
+          }
+        } else {
+          // Not completed but approved - if deadline passed, treat as penalty if configured
+          let deadlineDate: Date | null = null;
+          if (subtask.deadlineTime) {
+            if (isRecurring) {
+              const today = new Date();
+              today.setHours(0, 0, 0, 0);
+              deadlineDate = subtask.deadlineDate ? new Date(subtask.deadlineDate) : today;
+              deadlineDate.setHours(0, 0, 0, 0);
+            } else if (subtask.deadlineDate) {
+              deadlineDate = new Date(subtask.deadlineDate);
+              deadlineDate.setHours(0, 0, 0, 0);
+            } else {
+              deadlineDate = new Date();
+              deadlineDate.setHours(0, 0, 0, 0);
+            }
+            
+            const [h, m] = subtask.deadlineTime.split(":");
+            deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+          } else if (subtask.deadlineDate) {
+            deadlineDate = new Date(subtask.deadlineDate);
+            deadlineDate.setHours(23, 59, 59, 999);
+          } else if (subtask.dueDate) {
+            deadlineDate = new Date(subtask.dueDate);
+            if (subtask.dueTime) {
+              const [h, m] = subtask.dueTime.split(":");
+              deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+            } else {
+              deadlineDate.setHours(23, 59, 59, 999);
+            }
+          }
+          if (deadlineDate && nowLocal > deadlineDate) {
+            shouldGetPenalty = true;
+            baseDate = deadlineDate;
+            const deadlineDateNormalized = new Date(deadlineDate);
+            deadlineDateNormalized.setHours(0, 0, 0, 0);
+            const startDateNormalized = new Date(startDate);
+            startDateNormalized.setHours(0, 0, 0, 0);
+            const endDateNormalized = new Date(endDate);
+            endDateNormalized.setHours(23, 59, 59, 999);
+            
+            if (deadlineDateNormalized >= startDateNormalized && deadlineDateNormalized <= endDateNormalized) {
+              penaltyEventInPeriod = true;
+            }
+          }
+          
+          if (!baseDate) {
+            baseDate = subtask.createdAt;
+          }
+        }
+      } else if (approvalStatus === "rejected" || approvalStatus === "deadline_passed") {
+        if (penalty > 0 || penaltyCurrency > 0) {
+          shouldGetPenalty = true;
+          
+          if (approvalStatus === "deadline_passed") {
+            let deadlinePassedDate: Date | null = null;
+            
+            if (subtask.deadlineTime) {
+              if (isRecurring && subtask.createdAt) {
+                deadlinePassedDate = new Date(subtask.createdAt);
+                deadlinePassedDate.setHours(0, 0, 0, 0);
+              } else if (subtask.deadlineDate) {
+                deadlinePassedDate = new Date(subtask.deadlineDate);
+                deadlinePassedDate.setHours(0, 0, 0, 0);
+              } else if (subtask.createdAt) {
+                deadlinePassedDate = new Date(subtask.createdAt);
+                deadlinePassedDate.setHours(0, 0, 0, 0);
+              }
+              
+              if (deadlinePassedDate) {
+                const [h, m] = subtask.deadlineTime.split(":");
+                deadlinePassedDate.setHours(parseInt(h), parseInt(m), 0, 0);
+              }
+            } else if (subtask.deadlineDate) {
+              deadlinePassedDate = new Date(subtask.deadlineDate);
+              deadlinePassedDate.setHours(23, 59, 59, 999);
+            } else if (subtask.dueDate) {
+              deadlinePassedDate = new Date(subtask.dueDate);
+              if (subtask.dueTime) {
+                const [h, m] = subtask.dueTime.split(":");
+                deadlinePassedDate.setHours(parseInt(h), parseInt(m), 0, 0);
+              } else {
+                deadlinePassedDate.setHours(23, 59, 59, 999);
+              }
+            }
+            
+            if (deadlinePassedDate) {
+              baseDate = deadlinePassedDate;
+              const deadlineDateNormalized = new Date(deadlinePassedDate);
+              deadlineDateNormalized.setHours(0, 0, 0, 0);
+              const startDateNormalized = new Date(startDate);
+              startDateNormalized.setHours(0, 0, 0, 0);
+              const endDateNormalized = new Date(endDate);
+              endDateNormalized.setHours(23, 59, 59, 999);
+              
+              if (deadlineDateNormalized >= startDateNormalized && deadlineDateNormalized <= endDateNormalized) {
+                penaltyEventInPeriod = true;
+              }
+            } else {
+              baseDate = subtask.createdAt;
+            }
+          } else {
+            baseDate = subtask.createdAt;
+          }
+        }
+      } else {
+        baseDate = subtask.createdAt;
+      }
+
+      if (!baseDate) continue;
+      
+      // Only process if penalty/reward event occurred in the period
+      if (shouldGetPenalty && !penaltyEventInPeriod) {
+        continue;
+      }
+      
+      if (shouldGetReward && !rewardEventInPeriod) {
+        continue;
+      }
+      
+      const dateKey = toDateKey(baseDate);
+      const row = getOrCreateRow(employeeId, dateKey);
+      
+      // Total potential reward from subtasks
+      row.taskRewardTotal += bonus;
+      row.taskRewardTotalCurrency += bonusCurrency;
+
+      if (shouldGetPenalty && penaltyEventInPeriod) {
+        if (penalty > 0) {
+          row.taskFine += penalty;
+        }
+        if (penaltyCurrency > 0) {
+          row.taskFineCurrency += penaltyCurrency;
+        }
+      } else if (shouldGetReward && rewardEventInPeriod) {
+        if (bonus > 0) {
+          row.taskEarned += bonus;
+        }
+        if (bonusCurrency > 0) {
+          row.taskEarnedCurrency += bonusCurrency;
+        }
+      }
+    }
+    */ // END OF REMOVED OLD TASK/SUBTASK CALCULATION LOGIC
+
+    // TaskCompletion and SubtaskCompletion processing is now included in fetchTaskAnalysisData above
+    /* REMOVED: Old TaskCompletion and SubtaskCompletion processing - now handled in fetchTaskAnalysisData
+    // ----------------------------
     // 2.5) TaskCompletion Records (Historical tasks that were reset)
     // ----------------------------
-    const TaskCompletion = (await import("@/models/TaskCompletion")).default;
+    // Note: TaskCompletion is already imported above
     const taskCompletions = await TaskCompletion.find({
       approvalStatus: { $in: ["approved", "rejected", "deadline_passed"] }
     }).lean();
 
     for (const completion of taskCompletions as any[]) {
-      // Check if completion event occurred within the period
-      const completionDate = completion.approvedAt || completion.tickedAt || completion.completedAt || completion.createdAt;
+      // For deadline_passed completions, use the deadline date that passed
+      // For other statuses, use completion date
+      let completionDate: Date | null = null;
+      
+      if (completion.approvalStatus === "deadline_passed") {
+        // Calculate the deadline date that passed
+        let deadlinePassedDate: Date | null = null;
+        
+        if (completion.deadlineTime) {
+          if (completion.deadlineDate) {
+            deadlinePassedDate = new Date(completion.deadlineDate);
+            deadlinePassedDate.setHours(0, 0, 0, 0);
+          } else if (completion.assignedDate) {
+            deadlinePassedDate = new Date(completion.assignedDate);
+            deadlinePassedDate.setHours(0, 0, 0, 0);
+          }
+          
+          if (deadlinePassedDate) {
+            const [h, m] = completion.deadlineTime.split(":");
+            deadlinePassedDate.setHours(parseInt(h), parseInt(m), 0, 0);
+          }
+        } else if (completion.deadlineDate) {
+          deadlinePassedDate = new Date(completion.deadlineDate);
+          deadlinePassedDate.setHours(23, 59, 59, 999);
+        } else if (completion.dueDate) {
+          deadlinePassedDate = new Date(completion.dueDate);
+          if (completion.dueTime) {
+            const [h, m] = completion.dueTime.split(":");
+            deadlinePassedDate.setHours(parseInt(h), parseInt(m), 0, 0);
+          } else {
+            deadlinePassedDate.setHours(23, 59, 59, 999);
+          }
+        }
+        
+        completionDate = deadlinePassedDate || completion.assignedDate || completion.createdAt;
+      } else {
+        completionDate = completion.approvedAt || completion.tickedAt || completion.completedAt || completion.createdAt;
+      }
+      
       if (!completionDate) continue;
       
       const eventDate = new Date(completionDate);
       if (eventDate < startDate || eventDate > endDate) {
         continue; // Skip if outside period
+      }
+
+      // Check project status - only process completions from "active" projects
+      let projectStatus = null;
+      try {
+        if (completion.projectId) {
+          const project = await db.collection("projects").findOne(
+            { _id: completion.projectId instanceof ObjectId ? completion.projectId : new ObjectId(completion.projectId) },
+            { projection: { status: 1 } }
+          );
+          if (project) {
+            projectStatus = project.status || null;
+          }
+        }
+      } catch (e) {
+        // Couldn't fetch project status, skip this completion
+        continue;
+      }
+
+      // Skip completions from projects that are not "active"
+      if (projectStatus !== "active") {
+        continue;
       }
 
       const bonusCurrency = typeof completion.bonusCurrency === "number" ? completion.bonusCurrency : 0;
@@ -788,6 +1959,191 @@ export async function GET(request: NextRequest) {
         }
       }
     }
+
+    // ----------------------------
+    // 2.6) SubtaskCompletion Records (Historical subtasks that were reset)
+    // ----------------------------
+    const subtaskCompletions = await SubtaskCompletion.find({
+      approvalStatus: { $in: ["approved", "rejected", "deadline_passed"] }
+    }).lean();
+
+    for (const completion of subtaskCompletions as any[]) {
+      // For deadline_passed completions, use the deadline date that passed
+      // For other statuses, use completion date
+      let completionDate: Date | null = null;
+      
+      if (completion.approvalStatus === "deadline_passed") {
+        // Calculate the deadline date that passed
+        let deadlinePassedDate: Date | null = null;
+        
+        if (completion.deadlineTime) {
+          if (completion.deadlineDate) {
+            deadlinePassedDate = new Date(completion.deadlineDate);
+            deadlinePassedDate.setHours(0, 0, 0, 0);
+          } else if (completion.createdAt) {
+            deadlinePassedDate = new Date(completion.createdAt);
+            deadlinePassedDate.setHours(0, 0, 0, 0);
+          }
+          
+          if (deadlinePassedDate) {
+            const [h, m] = completion.deadlineTime.split(":");
+            deadlinePassedDate.setHours(parseInt(h), parseInt(m), 0, 0);
+          }
+        } else if (completion.deadlineDate) {
+          deadlinePassedDate = new Date(completion.deadlineDate);
+          deadlinePassedDate.setHours(23, 59, 59, 999);
+        } else if (completion.dueDate) {
+          deadlinePassedDate = new Date(completion.dueDate);
+          if (completion.dueTime) {
+            const [h, m] = completion.dueTime.split(":");
+            deadlinePassedDate.setHours(parseInt(h), parseInt(m), 0, 0);
+          } else {
+            deadlinePassedDate.setHours(23, 59, 59, 999);
+          }
+        }
+        
+        completionDate = deadlinePassedDate || completion.tickedAt || completion.completedAt || completion.createdAt;
+      } else {
+        completionDate = completion.tickedAt || completion.completedAt || completion.createdAt;
+      }
+      
+      if (!completionDate) continue;
+      
+      const eventDate = new Date(completionDate);
+      if (eventDate < startDate || eventDate > endDate) {
+        continue; // Skip if outside period
+      }
+
+      // Check project status for subtask completion - need to get parent task first
+      let projectStatus = null;
+      try {
+        if (completion.projectId) {
+          const project = await db.collection("projects").findOne(
+            { _id: completion.projectId instanceof ObjectId ? completion.projectId : new ObjectId(completion.projectId) },
+            { projection: { status: 1 } }
+          );
+          if (project) {
+            projectStatus = project.status || null;
+          }
+        } else if (completion.taskId) {
+          // Try to get project from parent task
+          const parentTask = await db.collection("tasks").findOne(
+            { _id: completion.taskId instanceof ObjectId ? completion.taskId : new ObjectId(completion.taskId) },
+            { projection: { projectId: 1 } }
+          );
+          if (parentTask && parentTask.projectId) {
+            const project = await db.collection("projects").findOne(
+              { _id: parentTask.projectId instanceof ObjectId ? parentTask.projectId : new ObjectId(parentTask.projectId) },
+              { projection: { status: 1 } }
+            );
+            if (project) {
+              projectStatus = project.status || null;
+            }
+          }
+        }
+      } catch (e) {
+        // Couldn't fetch project status, skip this completion
+        continue;
+      }
+
+      // Skip subtask completions from projects that are not "active"
+      if (projectStatus !== "active") {
+        continue;
+      }
+
+      // Get bonus/fine from completion record (now stored in SubtaskCompletion)
+      const bonusCurrency = typeof completion.bonusCurrency === "number" ? completion.bonusCurrency : 0;
+      const penaltyCurrency = typeof completion.penaltyCurrency === "number" ? completion.penaltyCurrency : 0;
+      const bonusPoints = typeof completion.bonusPoints === "number" ? completion.bonusPoints : 0;
+      const penaltyPoints = typeof completion.penaltyPoints === "number" ? completion.penaltyPoints : 0;
+      
+      // Use penaltyPoints as fallback if penaltyCurrency is 0
+      let finalPenaltyCurrency = penaltyCurrency;
+      if (penaltyCurrency <= 0 && penaltyPoints > 0) {
+        finalPenaltyCurrency = penaltyPoints;
+      }
+
+      // Subtasks have a single assignee
+      const employeeIds = new Set<string>();
+      if (Array.isArray(completion.assignees) && completion.assignees.length > 0) {
+        for (const id of completion.assignees) {
+          if (id) employeeIds.add(id.toString());
+        }
+      } else if (completion.completedBy) {
+        employeeIds.add(completion.completedBy.toString());
+      }
+
+      if (employeeIds.size === 0) continue;
+
+      const dateKey = toDateKey(completionDate);
+      const nowLocal = new Date();
+
+      // Determine if this completion resulted in reward or fine
+      let shouldGetPenalty = false;
+      let shouldGetReward = false;
+
+      if (completion.approvalStatus === "approved") {
+        // Check if subtask was completed late
+        let deadlineDate: Date | null = null;
+        if (completion.deadlineDate) {
+          deadlineDate = new Date(completion.deadlineDate);
+          if (completion.deadlineTime) {
+            const [h, m] = completion.deadlineTime.split(":");
+            deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+          } else {
+            deadlineDate.setHours(23, 59, 59, 999);
+          }
+        } else if (completion.dueDate) {
+          deadlineDate = new Date(completion.dueDate);
+          if (completion.dueTime) {
+            const [h, m] = completion.dueTime.split(":");
+            deadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+          } else {
+            deadlineDate.setHours(23, 59, 59, 999);
+          }
+        }
+
+        const completedAt = completion.tickedAt || completion.completedAt || completionDate;
+        if (deadlineDate && completedAt > deadlineDate) {
+          shouldGetPenalty = true;
+        } else if (bonusCurrency > 0 || bonusPoints > 0) {
+          shouldGetReward = true;
+        }
+      } else if (completion.approvalStatus === "rejected" || completion.approvalStatus === "deadline_passed") {
+        if (finalPenaltyCurrency > 0 || penaltyPoints > 0) {
+          shouldGetPenalty = true;
+        }
+      }
+
+      for (const empId of employeeIds) {
+        const row = getOrCreateRow(empId, dateKey);
+        
+        // Add to totals
+        row.taskRewardTotal += bonusPoints;
+        row.taskRewardTotalCurrency += bonusCurrency;
+
+        if (shouldGetPenalty) {
+          // Apply penalty points if available
+          if (penaltyPoints > 0) {
+            row.taskFine += penaltyPoints;
+          }
+          // Apply penalty currency
+          if (finalPenaltyCurrency > 0) {
+            row.taskFineCurrency += finalPenaltyCurrency;
+          }
+        } else if (shouldGetReward) {
+          // Apply reward points if available
+          if (bonusPoints > 0) {
+            row.taskEarned += bonusPoints;
+          }
+          // Apply reward currency
+          if (bonusCurrency > 0) {
+            row.taskEarnedCurrency += bonusCurrency;
+          }
+        }
+      }
+    }
+    */ // END OF REMOVED OLD COMPLETION RECORDS PROCESSING
 
     // ----------------------------
     // 3) Project-level Rewards/Fines

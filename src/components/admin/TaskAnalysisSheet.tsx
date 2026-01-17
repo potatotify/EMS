@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { FileSpreadsheet, Download, RefreshCw, CheckCircle, XCircle } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { FileSpreadsheet, Download, RefreshCw } from "lucide-react";
 import LoadingSpinner from "@/components/shared/LoadingSpinner";
 
 interface TaskAnalysisData {
@@ -49,24 +49,36 @@ export default function TaskAnalysisSheet() {
   const [tasks, setTasks] = useState<TaskAnalysisData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [approvingTaskId, setApprovingTaskId] = useState<string | null>(null);
-  const [approvingAll, setApprovingAll] = useState(false);
-  const [editingApprovalTaskId, setEditingApprovalTaskId] = useState<string | null>(null);
-  const [settingPointsTaskId, setSettingPointsTaskId] = useState<string | null>(null);
-  const [pointsForm, setPointsForm] = useState<{ bonusPoints: number; bonusCurrency: number; penaltyPoints: number; penaltyCurrency: number }>({ bonusPoints: 0, bonusCurrency: 0, penaltyPoints: 0, penaltyCurrency: 0 });
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalTasks, setTotalTasks] = useState<number>(0);
+  const [showingTasks, setShowingTasks] = useState<number>(0);
+  const pageSize = 10;
   const [projectFilter, setProjectFilter] = useState<string>("all");
   const [employeeFilter, setEmployeeFilter] = useState<string>("all");
-  const [approvalFilter, setApprovalFilter] = useState<string>("all");
   const [deadlineFilter, setDeadlineFilter] = useState<string>("all");
 
-  const fetchTasks = async () => {
+  const fetchTasks = async (page: number = currentPage) => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch("/api/admin/tasks/analysis", { cache: "no-store" });
+      // Build query string with filters and pagination
+      const params = new URLSearchParams({
+        page: page.toString(),
+        limit: pageSize.toString(),
+        projectFilter: projectFilter,
+        employeeFilter: employeeFilter,
+        deadlineFilter: deadlineFilter,
+      });
+      
+      const response = await fetch(`/api/admin/tasks/analysis?${params.toString()}`, { cache: "no-store" });
       const data = await response.json();
       if (response.ok) {
         setTasks(data.tasks || []);
+        setTotalTasks(data.total || 0);
+        setShowingTasks(data.showing || data.tasks?.length || 0);
+        setTotalPages(data.totalPages || 1);
+        setCurrentPage(data.page || page);
       } else {
         setError(data.error || "Failed to fetch tasks");
       }
@@ -78,104 +90,21 @@ export default function TaskAnalysisSheet() {
     }
   };
 
+  // Reset to page 1 when filters change
   useEffect(() => {
-    fetchTasks();
-  }, []);
+    setCurrentPage(1);
+  }, [projectFilter, employeeFilter, deadlineFilter]);
 
-  const handleApprove = async (taskId: string, approve: boolean, bonusPoints?: number, bonusCurrency?: number, penaltyPoints?: number, penaltyCurrency?: number, isTaskCompletion?: boolean) => {
-    setApprovingTaskId(taskId);
-    try {
-      // Find the task to check if it's a TaskCompletion record
-      const task = tasks.find(t => t._id === taskId);
-      const isTaskCompletionRecord = isTaskCompletion !== undefined 
-        ? isTaskCompletion 
-        : (task?.isTaskCompletion || task?.isHistorical || task?.entryType === "task_completion");
-      
-      console.log(`[TaskAnalysis] Approving task ${taskId}, isTaskCompletion: ${isTaskCompletionRecord}, entryType: ${task?.entryType}`);
-      
-      const response = await fetch(`/api/admin/tasks/${taskId}/approve`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ approve, bonusPoints, bonusCurrency, penaltyPoints, penaltyCurrency, isTaskCompletion: isTaskCompletionRecord }),
-      });
+  // Fetch tasks when page or filters change
+  useEffect(() => {
+    fetchTasks(currentPage);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, projectFilter, employeeFilter, deadlineFilter]);
 
-      if (response.ok) {
-        const result = await response.json();
-        // After approval/rejection, re-fetch from server so data is consistent
-        await fetchTasks();
-        setEditingApprovalTaskId(null);
-        setSettingPointsTaskId(null);
-        setPointsForm({ bonusPoints: 0, bonusCurrency: 0, penaltyPoints: 0, penaltyCurrency: 0 });
-        
-        // Show message if project was deleted
-        if (result.task?.projectDeleted) {
-          alert("Task approved successfully. Note: The project for this task has been deleted.");
-        }
-      } else {
-        const errorData = await response.json();
-        if (errorData.requiresPoints) {
-          // Show points setting UI for employee-created tasks
-          setSettingPointsTaskId(taskId);
-        } else {
-          alert(errorData.error || "Failed to approve task");
-        }
-      }
-    } catch (err) {
-      console.error("Error approving task:", err);
-      alert("Failed to approve task. Please try again.");
-    } finally {
-      setApprovingTaskId(null);
-    }
-  };
 
-  const handleApproveAll = async () => {
-    // Find all tasks that are unapproved and not rejected (excluding hackathon entries)
-    const unapprovedTasks = tasks.filter(
-      (task) =>
-        task.entryType !== "hackathon" &&
-        task.approvalStatus !== "approved" &&
-        task.approvalStatus !== "rejected"
-    );
-
-    if (unapprovedTasks.length === 0) {
-      alert("No unapproved tasks to approve");
-      return;
-    }
-
-    const confirmed = confirm(
-      `Are you sure you want to approve ${unapprovedTasks.length} task(s)?`
-    );
-    if (!confirmed) return;
-
-    setApprovingAll(true);
-    try {
-      const response = await fetch("/api/admin/tasks/mass-approve", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          taskIds: unapprovedTasks.map((t) => t._id),
-          approve: true,
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        await fetchTasks();
-        setEditingApprovalTaskId(null);
-        alert(`Successfully approved ${data.successful} task(s)`);
-      } else {
-        const errorData = await response.json();
-        alert(errorData.error || "Failed to approve tasks");
-      }
-    } catch (err) {
-      console.error("Error approving all tasks:", err);
-      alert("Failed to approve tasks. Please try again.");
-    } finally {
-      setApprovingAll(false);
-    }
-  };
-
-  // Derived filter options
+  // Derived filter options - fetch from a separate endpoint or use cached data
+  // For now, we'll fetch all unique values from the current page results
+  // In a production app, you might want a separate endpoint for filter options
   const projectOptions = Array.from(new Set(tasks.map((t) => t.projectName))).sort();
   const employeeOptions = Array.from(
     new Set(tasks.map((t) => t.personAssignedTo).filter(Boolean))
@@ -194,51 +123,8 @@ export default function TaskAnalysisSheet() {
   });
   const customFieldNames = Array.from(allCustomFieldNames).sort();
 
-  // Apply filters
-  const filteredTasks = tasks.filter((task) => {
-    if (projectFilter !== "all" && task.projectName !== projectFilter) return false;
-
-    if (
-      employeeFilter !== "all" &&
-      task.personAssignedTo &&
-      task.personAssignedTo !== employeeFilter
-    ) {
-      return false;
-    }
-
-    if (approvalFilter !== "all") {
-      if (approvalFilter === "pending") {
-        if (task.approvalStatus && task.approvalStatus !== "pending") return false;
-      } else if (task.approvalStatus !== approvalFilter) {
-        return false;
-      }
-    }
-
-    if (deadlineFilter !== "all") {
-      const today = new Date();
-      const todayStr = today.toDateString();
-
-      const deadlineStr = task.deadlineDate || task.dateDue;
-      if (!deadlineStr) {
-        if (deadlineFilter === "no_deadline") return true;
-        return false;
-      }
-
-      const d = new Date(deadlineStr);
-
-      if (deadlineFilter === "overdue") {
-        return d < today;
-      }
-      if (deadlineFilter === "today") {
-        return d.toDateString() === todayStr;
-      }
-      if (deadlineFilter === "upcoming") {
-        return d > today;
-      }
-    }
-
-    return true;
-  });
+  // Tasks are already filtered on the server, so use them directly
+  const filteredTasks = tasks;
 
   const exportToCSV = () => {
     if (filteredTasks.length === 0) return;
@@ -384,17 +270,6 @@ export default function TaskAnalysisSheet() {
               ))}
             </select>
             <select
-              value={approvalFilter}
-              onChange={(e) => setApprovalFilter(e.target.value)}
-              className="bg-white border border-neutral-300 rounded-lg px-2 py-1 text-xs text-neutral-800 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-200"
-            >
-              <option value="all">All Approvals</option>
-              <option value="pending">Pending</option>
-              <option value="approved">Approved</option>
-              <option value="rejected">Rejected</option>
-              <option value="deadline_passed">Deadline Passed</option>
-            </select>
-            <select
               value={deadlineFilter}
               onChange={(e) => setDeadlineFilter(e.target.value)}
               className="bg-white border border-neutral-300 rounded-lg px-2 py-1 text-xs text-neutral-800 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-200"
@@ -410,15 +285,11 @@ export default function TaskAnalysisSheet() {
           {/* Actions */}
           <div className="flex items-center gap-2">
             <button
-              onClick={handleApproveAll}
-              disabled={approvingAll}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <CheckCircle className="w-4 h-4" />
-              {approvingAll ? "Approving..." : "Approve All Unapproved"}
-            </button>
-            <button
-              onClick={fetchTasks}
+              onClick={() => {
+                const newPage = currentPage === 1 ? 1 : 1; // Always reset to page 1 on refresh
+                setCurrentPage(1);
+                fetchTasks(1);
+              }}
               className="inline-flex items-center gap-2 px-4 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-lg text-sm font-medium transition-colors"
             >
               <RefreshCw className="w-4 h-4" />
@@ -509,15 +380,12 @@ export default function TaskAnalysisSheet() {
                     {fieldName}
                   </th>
                 ))}
-                <th className="px-4 py-3 text-left text-xs font-semibold text-neutral-700 uppercase tracking-wider border-r border-neutral-200 min-w-[120px]">
-                  Approve
-                </th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-neutral-200">
               {filteredTasks.length === 0 ? (
                 <tr>
-                  <td colSpan={20 + customFieldNames.length} className="px-4 py-8 text-center text-neutral-500">
+                  <td colSpan={19 + customFieldNames.length} className="px-4 py-8 text-center text-neutral-500">
                     No tasks found
                   </td>
                 </tr>
@@ -536,7 +404,7 @@ export default function TaskAnalysisSheet() {
                               Project Deleted
                             </span>
                           )}
-                          {task.isTaskCompletion && (
+                          {task.isTaskCompletion && task.isHistorical && (
                             <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-medium">
                               Historical
                             </span>
@@ -685,185 +553,6 @@ export default function TaskAnalysisSheet() {
                         </td>
                       );
                     })}
-                    <td className="px-4 py-3 text-sm border-r border-neutral-200">
-                      {task.entryType === "hackathon" ? (
-                        <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded text-xs font-medium">
-                          Hackathon Entry
-                        </span>
-                      ) : settingPointsTaskId === task._id && task.createdByEmployee && task.status === "completed" ? (
-                        // Employee-created task: require bonus/penalty points before approval
-                        <div className="flex flex-col gap-2 p-2 bg-yellow-50 border border-yellow-200 rounded">
-                          <div className="text-xs font-semibold text-yellow-800">Set Rewards/Penalties (Required for Employee-Created Tasks)</div>
-                          <div className="grid grid-cols-2 gap-2">
-                            <div className="flex flex-col gap-1">
-                              <label className="text-xs text-neutral-600">Bonus Points</label>
-                              <input
-                                type="number"
-                                min="0"
-                                placeholder="Points"
-                                value={pointsForm.bonusPoints}
-                                onChange={(e) => setPointsForm({ ...pointsForm, bonusPoints: parseInt(e.target.value) || 0 })}
-                                className="w-full px-2 py-1 text-xs border border-neutral-300 rounded"
-                              />
-                            </div>
-                            <div className="flex flex-col gap-1">
-                              <label className="text-xs text-neutral-600">Bonus Currency (₹)</label>
-                              <input
-                                type="number"
-                                min="0"
-                                placeholder="Currency"
-                                value={pointsForm.bonusCurrency}
-                                onChange={(e) => setPointsForm({ ...pointsForm, bonusCurrency: parseInt(e.target.value) || 0 })}
-                                className="w-full px-2 py-1 text-xs border border-neutral-300 rounded"
-                              />
-                            </div>
-                            <div className="flex flex-col gap-1">
-                              <label className="text-xs text-neutral-600">Penalty Points</label>
-                              <input
-                                type="number"
-                                min="0"
-                                placeholder="Points"
-                                value={pointsForm.penaltyPoints}
-                                onChange={(e) => setPointsForm({ ...pointsForm, penaltyPoints: parseInt(e.target.value) || 0 })}
-                                className="w-full px-2 py-1 text-xs border border-neutral-300 rounded"
-                              />
-                            </div>
-                            <div className="flex flex-col gap-1">
-                              <label className="text-xs text-neutral-600">Penalty Currency (₹)</label>
-                              <input
-                                type="number"
-                                min="0"
-                                placeholder="Currency"
-                                value={pointsForm.penaltyCurrency}
-                                onChange={(e) => setPointsForm({ ...pointsForm, penaltyCurrency: parseInt(e.target.value) || 0 })}
-                                className="w-full px-2 py-1 text-xs border border-neutral-300 rounded"
-                              />
-                            </div>
-                          </div>
-                          <div className="flex gap-2 mt-2">
-                            <button
-                              onClick={() => handleApprove(task._id, true, pointsForm.bonusPoints, pointsForm.bonusCurrency, pointsForm.penaltyPoints, pointsForm.penaltyCurrency, task.isTaskCompletion)}
-                              disabled={approvingTaskId === task._id}
-                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs disabled:opacity-50"
-                            >
-                              Approve
-                            </button>
-                            <button
-                              onClick={() => {
-                                setSettingPointsTaskId(null);
-                                setPointsForm({ bonusPoints: 0, bonusCurrency: 0, penaltyPoints: 0, penaltyCurrency: 0 });
-                              }}
-                              className="px-3 py-1.5 bg-neutral-200 hover:bg-neutral-300 rounded text-xs"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      ) : editingApprovalTaskId === task._id ? (
-                        // Edit mode: show Approve/Reject buttons
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => handleApprove(task._id, true, undefined, undefined, undefined, undefined, task.isTaskCompletion)}
-                            disabled={approvingTaskId === task._id}
-                            className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            <CheckCircle className="w-3 h-3" />
-                            Approve
-                          </button>
-                          <button
-                            onClick={() => handleApprove(task._id, false, undefined, undefined, undefined, undefined, task.isTaskCompletion)}
-                            disabled={approvingTaskId === task._id}
-                            className="inline-flex items-center gap-1 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            <XCircle className="w-3 h-3" />
-                            Reject
-                          </button>
-                        </div>
-                      ) : task.approvalStatus === "approved" ? (
-                        <div className="flex items-center gap-2">
-                          <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-medium">
-                            Approved
-                          </span>
-                          <button
-                            onClick={() => setEditingApprovalTaskId(task._id)}
-                            className="text-xs text-emerald-700 hover:text-emerald-900 underline"
-                          >
-                            Edit
-                          </button>
-                        </div>
-                      ) : task.approvalStatus === "rejected" ? (
-                        <div className="flex items-center gap-2">
-                          <span className="px-2 py-1 bg-red-100 text-red-700 rounded text-xs font-medium">
-                            Rejected
-                          </span>
-                          <button
-                            onClick={() => setEditingApprovalTaskId(task._id)}
-                            className="text-xs text-emerald-700 hover:text-emerald-900 underline"
-                          >
-                            Edit
-                          </button>
-                        </div>
-                      ) : task.approvalStatus === "deadline_passed" ? (
-                        <div className="flex items-center gap-2">
-                          <span className="px-2 py-1 bg-orange-100 text-orange-700 rounded text-xs font-medium">
-                            Deadline Passed
-                          </span>
-                          <button
-                            onClick={() => setEditingApprovalTaskId(task._id)}
-                            className="text-xs text-emerald-700 hover:text-emerald-900 underline"
-                          >
-                            Edit
-                          </button>
-                        </div>
-                      ) : (
-                        // Pending (not yet approved/rejected): show Approve/Reject directly
-                        // For employee-created completed tasks, show special message
-                        task.createdByEmployee && task.status === "completed" ? (
-                          <div className="flex flex-col gap-1">
-                            <span className="text-xs text-yellow-700 font-medium">Employee-Created Task</span>
-                            <div className="flex items-center gap-2">
-                              <button
-                                onClick={() => {
-                                  setSettingPointsTaskId(task._id);
-                                  setPointsForm({ bonusPoints: 0, bonusCurrency: 0, penaltyPoints: 0, penaltyCurrency: 0 });
-                                }}
-                                className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-medium transition-colors"
-                              >
-                                <CheckCircle className="w-3 h-3" />
-                                Set Points & Approve
-                              </button>
-                              <button
-                                onClick={() => handleApprove(task._id, false, undefined, undefined, undefined, undefined, task.isTaskCompletion)}
-                                disabled={approvingTaskId === task._id}
-                                className="inline-flex items-center gap-1 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                              >
-                                <XCircle className="w-3 h-3" />
-                                Reject
-                              </button>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-2">
-                            <button
-                            onClick={() => handleApprove(task._id, true, undefined, undefined, undefined, undefined, task.isTaskCompletion)}
-                            disabled={approvingTaskId === task._id}
-                            className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            <CheckCircle className="w-3 h-3" />
-                            Approve
-                          </button>
-                          <button
-                            onClick={() => handleApprove(task._id, false, undefined, undefined, undefined, undefined, task.isTaskCompletion)}
-                              disabled={approvingTaskId === task._id}
-                              className="inline-flex items-center gap-1 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                              <XCircle className="w-3 h-3" />
-                              Reject
-                            </button>
-                          </div>
-                        )
-                      )}
-                    </td>
                   </tr>
                   );
                 })
@@ -873,9 +562,44 @@ export default function TaskAnalysisSheet() {
         </div>
       </div>
 
-      {/* Summary */}
-      <div className="text-sm text-neutral-600">
-        Total Tasks: <span className="font-semibold">{tasks.length}</span>
+      {/* Pagination and Summary */}
+      <div className="flex items-center justify-between">
+        <div className="text-sm text-neutral-600">
+          Showing <span className="font-semibold">{showingTasks}</span> of <span className="font-semibold">{totalTasks}</span> tasks
+        </div>
+        
+        {/* Pagination Controls */}
+        {totalPages > 1 && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                if (currentPage > 1) {
+                  setCurrentPage(currentPage - 1);
+                }
+              }}
+              disabled={currentPage === 1 || loading}
+              className="px-3 py-1.5 bg-white border border-neutral-300 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              Previous
+            </button>
+            
+            <span className="text-sm text-neutral-600">
+              Page <span className="font-semibold">{currentPage}</span> of <span className="font-semibold">{totalPages}</span>
+            </span>
+            
+            <button
+              onClick={() => {
+                if (currentPage < totalPages) {
+                  setCurrentPage(currentPage + 1);
+                }
+              }}
+              disabled={currentPage === totalPages || loading}
+              className="px-3 py-1.5 bg-white border border-neutral-300 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              Next
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

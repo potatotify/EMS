@@ -30,8 +30,15 @@ export default function EmployeesSection() {
   const [hoursWorkedData, setHoursWorkedData] = useState<Record<string, number>>({});
   const [hoursWorkedTodayData, setHoursWorkedTodayData] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
+  const [loadingAttendance, setLoadingAttendance] = useState(false);
+  const [loadingMonthlyAttendance, setLoadingMonthlyAttendance] = useState(false);
+  const [loadingHoursWorked, setLoadingHoursWorked] = useState(false);
+  const [loadingHoursWorkedToday, setLoadingHoursWorkedToday] = useState(false);
+  const [loadingCustomDuration, setLoadingCustomDuration] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
+  // Cache for employee data to avoid redundant API calls
+  const [employeeDataCache, setEmployeeDataCache] = useState<Record<string, any>>({});
   const [selectedDate, setSelectedDate] = useState<string>(
     new Date().toISOString().split("T")[0]
   );
@@ -48,6 +55,8 @@ export default function EmployeesSection() {
 
   useEffect(() => {
     if (employees.length > 0) {
+      // Clear cache when date changes to ensure fresh data
+      setEmployeeDataCache({});
       fetchAttendanceForAll();
       fetchMonthlyAttendance();
       fetchHoursWorked();
@@ -57,6 +66,8 @@ export default function EmployeesSection() {
 
   useEffect(() => {
     if (employees.length > 0) {
+      // Clear cache when custom duration changes to ensure fresh data
+      setEmployeeDataCache({});
       fetchCustomDurationAttendance();
       fetchHoursWorked();
     }
@@ -80,6 +91,7 @@ export default function EmployeesSection() {
   const fetchAttendanceForAll = async () => {
     if (employees.length === 0) return;
     
+    setLoadingAttendance(true);
     try {
       const targetDate = new Date(selectedDate);
       const startOfDay = new Date(targetDate);
@@ -89,9 +101,17 @@ export default function EmployeesSection() {
 
       const attendancePromises = employees.map(async (emp) => {
         try {
-          const response = await fetch(`/api/admin/employee/${emp._id}`);
-          const data = await response.json();
-          if (response.ok && data.attendanceRecords) {
+          // Check cache first
+          let data = employeeDataCache[emp._id];
+          if (!data) {
+            const response = await fetch(`/api/admin/employee/${emp._id}`);
+            data = await response.json();
+            if (response.ok) {
+              setEmployeeDataCache(prev => ({ ...prev, [emp._id]: data }));
+            }
+          }
+          
+          if (data && data.attendanceRecords) {
             const todayAttendance = data.attendanceRecords.filter((record: AttendanceRecord) => {
               const recordDate = new Date(record.date);
               return recordDate >= startOfDay && recordDate <= endOfDay;
@@ -104,20 +124,25 @@ export default function EmployeesSection() {
         return {employeeId: emp._id, attendance: []};
       });
 
-      const results = await Promise.all(attendancePromises);
+      const results = await Promise.allSettled(attendancePromises);
       const attendanceMap: Record<string, AttendanceRecord[]> = {};
       results.forEach((result) => {
-        attendanceMap[result.employeeId] = result.attendance;
+        if (result.status === 'fulfilled') {
+          attendanceMap[result.value.employeeId] = result.value.attendance;
+        }
       });
       setAttendanceData(attendanceMap);
     } catch (error) {
       console.error("Error fetching attendance:", error);
+    } finally {
+      setLoadingAttendance(false);
     }
   };
 
   const fetchMonthlyAttendance = async () => {
     if (employees.length === 0) return;
     
+    setLoadingMonthlyAttendance(true);
     try {
       const now = new Date();
       const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -127,9 +152,17 @@ export default function EmployeesSection() {
 
       const attendancePromises = employees.map(async (emp) => {
         try {
-          const response = await fetch(`/api/admin/employee/${emp._id}`);
-          const data = await response.json();
-          if (response.ok && data.attendanceRecords) {
+          // Check cache first
+          let data = employeeDataCache[emp._id];
+          if (!data) {
+            const response = await fetch(`/api/admin/employee/${emp._id}`);
+            data = await response.json();
+            if (response.ok) {
+              setEmployeeDataCache(prev => ({ ...prev, [emp._id]: data }));
+            }
+          }
+          
+          if (data && data.attendanceRecords) {
             const monthlyCount = data.attendanceRecords.filter((record: AttendanceRecord) => {
               const recordDate = new Date(record.date);
               return recordDate >= startOfMonth && recordDate <= endOfMonth;
@@ -142,20 +175,25 @@ export default function EmployeesSection() {
         return {employeeId: emp._id, count: 0};
       });
 
-      const results = await Promise.all(attendancePromises);
+      const results = await Promise.allSettled(attendancePromises);
       const monthlyCountMap: Record<string, number> = {};
       results.forEach((result) => {
-        monthlyCountMap[result.employeeId] = result.count;
+        if (result.status === 'fulfilled') {
+          monthlyCountMap[result.value.employeeId] = result.value.count;
+        }
       });
       setMonthlyAttendanceData(monthlyCountMap);
     } catch (error) {
       console.error("Error fetching monthly attendance:", error);
+    } finally {
+      setLoadingMonthlyAttendance(false);
     }
   };
 
   const fetchHoursWorked = async () => {
     if (employees.length === 0) return;
     
+    setLoadingHoursWorked(true);
     try {
       // Use custom duration dates if available, otherwise use current month
       const startDate = customStartDate 
@@ -190,9 +228,17 @@ export default function EmployeesSection() {
           }
           
           // Also check daily updates and attendance records (fallback/additional sources)
-          const response = await fetch(`/api/admin/employee/${emp._id}`);
-          const data = await response.json();
-          if (response.ok) {
+          // Check cache first
+          let data = employeeDataCache[emp._id];
+          if (!data) {
+            const response = await fetch(`/api/admin/employee/${emp._id}`);
+            data = await response.json();
+            if (response.ok) {
+              setEmployeeDataCache(prev => ({ ...prev, [emp._id]: data }));
+            }
+          }
+          
+          if (data) {
             // Add hours from daily updates
             if (data.dailyUpdates && data.dailyUpdates.length > 0) {
               const updatesInRange = data.dailyUpdates.filter((update: any) => {
@@ -234,12 +280,15 @@ export default function EmployeesSection() {
       setHoursWorkedData(hoursMap);
     } catch (error) {
       console.error("Error fetching hours worked:", error);
+    } finally {
+      setLoadingHoursWorked(false);
     }
   };
 
   const fetchHoursWorkedToday = async () => {
     if (employees.length === 0) return;
     
+    setLoadingHoursWorkedToday(true);
     try {
       const targetDate = new Date(selectedDate);
       const startOfDay = new Date(targetDate);
@@ -265,9 +314,17 @@ export default function EmployeesSection() {
           }
           
           // Also check daily updates and attendance records (fallback/additional sources)
-          const response = await fetch(`/api/admin/employee/${emp._id}`);
-          const data = await response.json();
-          if (response.ok) {
+          // Check cache first
+          let data = employeeDataCache[emp._id];
+          if (!data) {
+            const response = await fetch(`/api/admin/employee/${emp._id}`);
+            data = await response.json();
+            if (response.ok) {
+              setEmployeeDataCache(prev => ({ ...prev, [emp._id]: data }));
+            }
+          }
+          
+          if (data) {
             // Add hours from daily updates
             if (data.dailyUpdates && data.dailyUpdates.length > 0) {
               const todayUpdate = data.dailyUpdates.find((update: any) => {
@@ -306,12 +363,15 @@ export default function EmployeesSection() {
       setHoursWorkedTodayData(hoursMap);
     } catch (error) {
       console.error("Error fetching today's hours worked:", error);
+    } finally {
+      setLoadingHoursWorkedToday(false);
     }
   };
 
   const fetchCustomDurationAttendance = async () => {
     if (employees.length === 0 || !customStartDate || !customEndDate) return;
     
+    setLoadingCustomDuration(true);
     try {
       const startDate = new Date(customStartDate);
       startDate.setHours(0, 0, 0, 0);
@@ -320,9 +380,17 @@ export default function EmployeesSection() {
 
       const attendancePromises = employees.map(async (emp) => {
         try {
-          const response = await fetch(`/api/admin/employee/${emp._id}`);
-          const data = await response.json();
-          if (response.ok && data.attendanceRecords) {
+          // Check cache first
+          let data = employeeDataCache[emp._id];
+          if (!data) {
+            const response = await fetch(`/api/admin/employee/${emp._id}`);
+            data = await response.json();
+            if (response.ok) {
+              setEmployeeDataCache(prev => ({ ...prev, [emp._id]: data }));
+            }
+          }
+          
+          if (data && data.attendanceRecords) {
             const customCount = data.attendanceRecords.filter((record: AttendanceRecord) => {
               const recordDate = new Date(record.date);
               return recordDate >= startDate && recordDate <= endDate;
@@ -335,14 +403,18 @@ export default function EmployeesSection() {
         return {employeeId: emp._id, count: 0};
       });
 
-      const results = await Promise.all(attendancePromises);
+      const results = await Promise.allSettled(attendancePromises);
       const customCountMap: Record<string, number> = {};
       results.forEach((result) => {
-        customCountMap[result.employeeId] = result.count;
+        if (result.status === 'fulfilled') {
+          customCountMap[result.value.employeeId] = result.value.count;
+        }
       });
       setCustomDurationData(customCountMap);
     } catch (error) {
       console.error("Error fetching custom duration attendance:", error);
+    } finally {
+      setLoadingCustomDuration(false);
     }
   };
 
@@ -388,6 +460,9 @@ export default function EmployeesSection() {
       </td>
     </tr>
   );
+
+  // Helper to check if any data is loading
+  const isDataLoading = loadingAttendance || loadingMonthlyAttendance || loadingHoursWorked || loadingHoursWorkedToday || loadingCustomDuration;
 
   if (loading) {
     return (
@@ -579,39 +654,67 @@ export default function EmployeesSection() {
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <Calendar className="w-4 h-4 text-gray-500" />
-                          <span className="text-sm font-semibold text-gray-900">
-                            {monthlyAttendanceData[employee._id] || 0} days
-                          </span>
-                        </div>
+                        {loadingMonthlyAttendance ? (
+                          <div className="animate-pulse">
+                            <div className="h-4 bg-neutral-200 rounded w-16"></div>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <Calendar className="w-4 h-4 text-gray-500" />
+                            <span className="text-sm font-semibold text-gray-900">
+                              {monthlyAttendanceData[employee._id] || 0} days
+                            </span>
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <Calendar className="w-4 h-4 text-blue-600" />
-                          <span className="text-sm font-semibold text-blue-900">
-                            {customDurationData[employee._id] || 0} days
-                          </span>
-                        </div>
+                        {loadingCustomDuration ? (
+                          <div className="animate-pulse">
+                            <div className="h-4 bg-neutral-200 rounded w-16"></div>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <Calendar className="w-4 h-4 text-blue-600" />
+                            <span className="text-sm font-semibold text-blue-900">
+                              {customDurationData[employee._id] || 0} days
+                            </span>
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <Clock className="w-4 h-4 text-blue-500" />
-                          <span className="text-sm font-semibold text-blue-900" title={`Hours worked from ${customStartDate} to ${customEndDate}: ${hoursWorkedData[employee.userId] || 0}`}>
-                            {(hoursWorkedData[employee.userId] || 0).toFixed(1)}h
-                          </span>
-                        </div>
+                        {loadingHoursWorked ? (
+                          <div className="animate-pulse">
+                            <div className="h-4 bg-neutral-200 rounded w-20"></div>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <Clock className="w-4 h-4 text-blue-500" />
+                            <span className="text-sm font-semibold text-blue-900" title={`Hours worked from ${customStartDate} to ${customEndDate}: ${hoursWorkedData[employee.userId] || 0}`}>
+                              {(hoursWorkedData[employee.userId] || 0).toFixed(1)}h
+                            </span>
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <Clock className="w-4 h-4 text-emerald-600" />
-                          <span className="text-sm font-semibold text-emerald-700" title={`Hours worked on ${selectedDate}: ${hoursWorkedTodayData[employee._id] || 0}`}>
-                            {(hoursWorkedTodayData[employee._id] || 0).toFixed(1)}h
-                          </span>
-                        </div>
+                        {loadingHoursWorkedToday ? (
+                          <div className="animate-pulse">
+                            <div className="h-4 bg-neutral-200 rounded w-20"></div>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <Clock className="w-4 h-4 text-emerald-600" />
+                            <span className="text-sm font-semibold text-emerald-700" title={`Hours worked on ${selectedDate}: ${hoursWorkedTodayData[employee._id] || 0}`}>
+                              {(hoursWorkedTodayData[employee._id] || 0).toFixed(1)}h
+                            </span>
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3">
-                        {attendance.present ? (
+                        {loadingAttendance ? (
+                          <div className="animate-pulse">
+                            <div className="h-6 bg-neutral-200 rounded w-24"></div>
+                          </div>
+                        ) : attendance.present ? (
                           <div className="flex items-center gap-2">
                             <CheckCircle className="w-5 h-5 text-green-600" />
                             <span className="text-sm font-medium text-green-700">Present</span>

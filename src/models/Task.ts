@@ -48,7 +48,7 @@ export interface ITask extends Document {
   // Approval
   approvedBy?: mongoose.Types.ObjectId; // Admin who approved
   approvedAt?: Date; // When task was approved
-  approvalStatus?: "pending" | "approved" | "rejected"; // Approval status
+  approvalStatus?: "pending" | "approved" | "rejected" | "deadline_passed"; // Approval status
   
   // Recurring task settings
   recurringPattern?: {
@@ -212,7 +212,7 @@ const TaskSchema = new Schema<ITask>(
     },
     approvalStatus: {
       type: String,
-      enum: ["pending", "approved", "rejected"],
+      enum: ["pending", "approved", "rejected", "deadline_passed"],
       default: "pending",
     },
     recurringPattern: {
@@ -343,6 +343,11 @@ TaskSchema.pre("save", function (next) {
   }
   next();
 });
+
+// In development, delete cached model to ensure schema updates are applied
+if (process.env.NODE_ENV === "development" && mongoose.models.Task) {
+  delete mongoose.models.Task;
+}
 
 const Task = mongoose.models.Task || mongoose.model<ITask>("Task", TaskSchema);
 

@@ -143,7 +143,7 @@ export async function PATCH(
 
     await dbConnect();
 
-    const task = await Task.findById(taskId);
+    let task = await Task.findById(taskId);
     if (!task) {
       return NextResponse.json({ error: "Task not found" }, { status: 404 });
     }
@@ -474,19 +474,153 @@ export async function PATCH(
       }, { status: 400 });
     }
     
-    // Save task with better error handling
-    try {
-      await task.save();
-    } catch (saveError: any) {
-      console.error("Error saving task:", saveError);
-      const errorMessage = saveError.message || "Failed to save task";
-      const errorDetails = saveError.errors 
-        ? Object.values(saveError.errors).map((e: any) => e.message).join(", ")
+    // Save task with retry logic for version conflicts
+    let saveAttempts = 0;
+    const maxRetries = 3;
+    let saveSuccess = false;
+    let lastError: any = null;
+    
+    while (saveAttempts < maxRetries && !saveSuccess) {
+      try {
+        await task.save();
+        saveSuccess = true;
+      } catch (saveError: any) {
+        lastError = saveError;
+        saveAttempts++;
+        
+        // Check if it's a version conflict error
+        if (saveError.name === 'VersionError' || saveError.message?.includes('No matching document found')) {
+          console.warn(`Version conflict detected (attempt ${saveAttempts}/${maxRetries}), retrying...`);
+          
+          if (saveAttempts < maxRetries) {
+            // Reload the task to get the latest version
+            const freshTask = await Task.findById(taskId);
+            if (!freshTask) {
+              return NextResponse.json({ error: "Task not found" }, { status: 404 });
+            }
+            
+            // Reapply all the changes to the fresh task
+            // Copy all modified fields from the old task to the fresh task
+            if (body.title !== undefined) freshTask.title = task.title;
+            if (body.description !== undefined) freshTask.description = task.description;
+            if (body.section !== undefined) freshTask.section = task.section;
+            if (body.taskKind !== undefined) freshTask.taskKind = task.taskKind;
+            if (body.priority !== undefined) freshTask.priority = task.priority;
+            if (body.bonusPoints !== undefined) freshTask.bonusPoints = task.bonusPoints;
+            if (body.bonusCurrency !== undefined) freshTask.bonusCurrency = task.bonusCurrency;
+            if (body.penaltyPoints !== undefined) freshTask.penaltyPoints = task.penaltyPoints;
+            if (body.penaltyCurrency !== undefined) freshTask.penaltyCurrency = task.penaltyCurrency;
+            if (body.status !== undefined) freshTask.status = task.status;
+            if (body.order !== undefined) freshTask.order = task.order;
+            
+            // Date fields
+            if (body.assignedDate !== undefined) freshTask.assignedDate = task.assignedDate;
+            if (body.assignedTime !== undefined) freshTask.assignedTime = task.assignedTime;
+            if (body.dueDate !== undefined) freshTask.dueDate = task.dueDate;
+            if (body.dueTime !== undefined) freshTask.dueTime = task.dueTime;
+            if (body.deadlineDate !== undefined) freshTask.deadlineDate = task.deadlineDate;
+            if (body.deadlineTime !== undefined) freshTask.deadlineTime = task.deadlineTime;
+            
+            // Assignment fields
+            if (body.assignees !== undefined || body.assignedTo !== undefined) {
+              freshTask.assignees = task.assignees;
+              freshTask.assigneeNames = task.assigneeNames;
+              freshTask.assignedTo = task.assignedTo;
+              freshTask.assignedToName = task.assignedToName;
+            }
+            
+            // Recurring pattern
+            if (body.recurringPattern !== undefined) {
+              freshTask.recurringPattern = task.recurringPattern;
+            }
+            
+            // Custom recurrence
+            if (body.customRecurrence !== undefined || (body.taskKind !== undefined && body.taskKind !== "custom")) {
+              freshTask.customRecurrence = task.customRecurrence;
+              freshTask.markModified("customRecurrence");
+            }
+            
+            // Custom fields
+            if (body.customFields !== undefined) {
+              freshTask.customFields = task.customFields;
+              freshTask.markModified("customFields");
+            }
+            
+            // Completion fields
+            if (body.status !== undefined) {
+              freshTask.completedAt = task.completedAt;
+              freshTask.completedBy = task.completedBy;
+              freshTask.tickedAt = task.tickedAt;
+              freshTask.approvalStatus = task.approvalStatus;
+              freshTask.approvedBy = task.approvedBy;
+              freshTask.approvedAt = task.approvedAt;
+            }
+            
+            // Mark modified fields
+            if (body.assignees !== undefined || body.assignedTo !== undefined) {
+              freshTask.markModified("assignees");
+              freshTask.markModified("assigneeNames");
+              freshTask.markModified("assignedTo");
+              freshTask.markModified("assignedToName");
+            }
+            
+            // Replace task with fresh task for next retry
+            task = freshTask;
+            
+            // Wait a bit before retrying (exponential backoff)
+            await new Promise(resolve => setTimeout(resolve, 100 * saveAttempts));
+            continue;
+          }
+        }
+        
+        // If it's not a version error or we've exhausted retries, break and return error
+        break;
+      }
+    }
+    
+    // If save failed after all retries, return error
+    if (!saveSuccess) {
+      console.error("Error saving task after retries:", lastError);
+      const errorMessage = lastError?.message || "Failed to save task";
+      const errorDetails = lastError?.errors 
+        ? Object.values(lastError.errors).map((e: any) => e.message).join(", ")
         : errorMessage;
+      
+      // For version errors, check if the task was actually saved
+      if (lastError?.name === 'VersionError' || lastError?.message?.includes('No matching document found')) {
+        // Check if the task was actually saved despite the error
+        const verifyTask = await Task.findById(taskId);
+        if (verifyTask) {
+          // Task exists, check if our changes were applied
+          const changesApplied = 
+            (body.title === undefined || verifyTask.title === task.title) &&
+            (body.status === undefined || verifyTask.status === task.status);
+          
+          if (changesApplied) {
+            // Task was saved successfully despite version error
+            console.warn("Version conflict occurred but task was saved successfully");
+            // Continue with normal flow - reload task below
+            saveSuccess = true;
+          } else {
+            return NextResponse.json({ 
+              error: "Task was modified by another user",
+              message: "The task was updated by another user. Please refresh and try again.",
+              details: "Version conflict detected"
+            }, { status: 409 }); // 409 Conflict is more appropriate for version conflicts
+          }
+        } else {
+          return NextResponse.json({ 
+            error: "Task was modified by another user",
+            message: "The task was updated by another user. Please refresh and try again.",
+            details: "Version conflict detected"
+          }, { status: 409 });
+        }
+      }
+      
       return NextResponse.json({ 
         error: "Failed to save task",
         message: errorDetails,
-        details: saveError.stack
+        details: lastError?.stack
       }, { status: 500 });
     }
     
@@ -609,14 +743,42 @@ export async function DELETE(
     const { taskId } = await params;
 
     await dbConnect();
+    const client = await clientPromise;
+    const db = client.db("worknest");
 
+    // Delete all subtasks associated with this task
+    const subtasksResult = await db.collection("subtasks").deleteMany({
+      taskId: new ObjectId(taskId)
+    });
+    console.log(`[Task Delete] Deleted ${subtasksResult.deletedCount} subtask(s) for task ${taskId}`);
+
+    // Delete all SubtaskCompletion records for subtasks of this task
+    // First, get all subtask IDs that belong to this task
+    const subtasks = await db.collection("subtasks").find({
+      taskId: new ObjectId(taskId)
+    }).project({ _id: 1 }).toArray();
+    
+    if (subtasks.length > 0) {
+      const subtaskIds = subtasks.map((st: any) => st._id);
+      const SubtaskCompletion = (await import("@/models/SubtaskCompletion")).default;
+      const subtaskCompletionResult = await SubtaskCompletion.deleteMany({
+        subtaskId: { $in: subtaskIds }
+      });
+      console.log(`[Task Delete] Deleted ${subtaskCompletionResult.deletedCount} SubtaskCompletion record(s) for task ${taskId}`);
+    }
+
+    // Delete the task
     const task = await Task.findByIdAndDelete(taskId);
 
     if (!task) {
       return NextResponse.json({ error: "Task not found" }, { status: 404 });
     }
 
-    return NextResponse.json({ success: true, message: "Task deleted successfully" });
+    return NextResponse.json({ 
+      success: true, 
+      message: "Task deleted successfully",
+      deletedSubtasks: subtasksResult.deletedCount
+    });
   } catch (error) {
     console.error("Error deleting task:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

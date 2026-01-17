@@ -230,9 +230,14 @@ export default function BonusPointsSheet() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <FileSpreadsheet className="w-6 h-6 text-emerald-600" />
-          <h2 className="text-2xl font-bold text-neutral-900">
-            Bonus Points Summary
-          </h2>
+          <div>
+            <h2 className="text-2xl font-bold text-neutral-900">
+              Bonus Points Summary
+            </h2>
+            <p className="text-xs text-neutral-500 mt-0.5">
+              Task bonuses and fines are calculated from the Task Analysis page
+            </p>
+          </div>
         </div>
         <div className="flex flex-col items-end gap-2">
           {/* Filters */}
@@ -356,18 +361,20 @@ export default function BonusPointsSheet() {
                   <div className="mb-1">Fine</div>
                   <div className="text-red-600 font-medium">Pts | ₹</div>
                 </th>
-                {/* Tasks */}
-                <th className="px-4 py-3 text-center text-xs font-semibold text-neutral-600 border-r border-neutral-200 min-w-[100px]">
+                {/* Tasks - Values from Task Analysis */}
+                <th className="px-4 py-3 text-center text-xs font-semibold text-neutral-600 border-r border-neutral-200 min-w-[100px] bg-orange-50">
                   <div className="mb-1">Total</div>
                   <div className="text-green-600 font-medium">Pts | ₹</div>
                 </th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-neutral-600 border-r border-neutral-200 min-w-[100px]">
+                <th className="px-4 py-3 text-center text-xs font-semibold text-neutral-600 border-r border-neutral-200 min-w-[100px] bg-orange-50">
                   <div className="mb-1">Earned</div>
                   <div className="text-green-600 font-medium">Pts | ₹</div>
+                  <div className="text-[9px] text-orange-600 mt-0.5">(from Task Analysis)</div>
                 </th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-neutral-600 border-r border-neutral-300 min-w-[100px]">
+                <th className="px-4 py-3 text-center text-xs font-semibold text-neutral-600 border-r border-neutral-300 min-w-[100px] bg-orange-50">
                   <div className="mb-1">Fine</div>
                   <div className="text-red-600 font-medium">Pts | ₹</div>
+                  <div className="text-[9px] text-orange-600 mt-0.5">(from Task Analysis)</div>
                 </th>
                 {/* Hackathons */}
                 <th className="px-4 py-3 text-center text-xs font-semibold text-neutral-600 border-r border-neutral-300 min-w-[100px]">
