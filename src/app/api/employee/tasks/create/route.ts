@@ -184,12 +184,29 @@ export async function POST(request: NextRequest) {
     const assignedDate = now.toISOString().split("T")[0];
     const assignedTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
 
-    // For recurring tasks (daily/weekly/monthly), set deadlineDate to today if deadlineTime is set but deadlineDate is not
+    // For daily tasks, ALWAYS set deadlineDate to today in IST (ignore any provided deadlineDate)
+    // For other recurring tasks, set to today if deadlineTime is set but deadlineDate is not
     let finalDeadlineDate = deadlineDate;
-    if ((["daily", "weekly", "monthly"].includes(taskKind || "")) && deadlineTime && !deadlineDate) {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      finalDeadlineDate = today.toISOString().split("T")[0];
+    if (taskKind === "daily" && deadlineTime) {
+      // For daily tasks, ALWAYS use today's date in IST, regardless of what's provided
+      const now = new Date();
+      const istFormatter = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Kolkata",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      });
+      finalDeadlineDate = istFormatter.format(now); // Returns YYYY-MM-DD in IST
+    } else if ((["weekly", "monthly"].includes(taskKind || "")) && deadlineTime && !deadlineDate) {
+      // For weekly/monthly tasks, use today if deadlineDate not provided
+      const now = new Date();
+      const istFormatter = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Kolkata",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      });
+      finalDeadlineDate = istFormatter.format(now); // Returns YYYY-MM-DD in IST
     }
 
     // Create task - employee-created tasks have no bonus/penalty

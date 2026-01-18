@@ -545,10 +545,19 @@ export async function resetRecurringTasksForProject(projectId: string): Promise<
           approvalStatus: "pending"
         };
         
-        // If task has deadlineTime but is recurring, set deadlineDate to today
+        // If task has deadlineTime but is recurring, set deadlineDate to today in IST
         if (task.deadlineTime && ["daily", "weekly", "monthly"].includes(task.taskKind)) {
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
+          // For daily tasks, ALWAYS use today's date in IST
+          // For weekly/monthly tasks, also use today in IST
+          const now = new Date();
+          const istFormatter = new Intl.DateTimeFormat("en-CA", {
+            timeZone: "Asia/Kolkata",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+          });
+          const todayISTString = istFormatter.format(now); // Returns YYYY-MM-DD in IST
+          const today = new Date(todayISTString + "T00:00:00");
           updateFields.deadlineDate = today;
         }
         
@@ -819,10 +828,19 @@ export async function resetRecurringTasksForUser(userId: string): Promise<number
           approvalStatus: "pending"
         };
         
-        // If task has deadlineTime but is recurring, set deadlineDate to today
+        // If task has deadlineTime but is recurring, set deadlineDate to today in IST
         if (task.deadlineTime && ["daily", "weekly", "monthly"].includes(task.taskKind)) {
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
+          // For daily tasks, ALWAYS use today's date in IST
+          // For weekly/monthly tasks, also use today in IST
+          const now = new Date();
+          const istFormatter = new Intl.DateTimeFormat("en-CA", {
+            timeZone: "Asia/Kolkata",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+          });
+          const todayISTString = istFormatter.format(now); // Returns YYYY-MM-DD in IST
+          const today = new Date(todayISTString + "T00:00:00");
           updateFields.deadlineDate = today;
         }
         
@@ -896,6 +914,17 @@ export async function resetAllRecurringTasks(): Promise<number> {
     const tomorrow = new Date(now);
     tomorrow.setDate(tomorrow.getDate() + 1);
     tomorrow.setHours(1, 0, 0, 0); // 1:00 AM next day for assigned time
+    
+    // For daily tasks, deadline should be today's date in IST (not tomorrow)
+    // Get today's date in IST timezone to ensure accuracy
+    const istFormatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    const todayISTString = istFormatter.format(now); // Returns YYYY-MM-DD in IST
+    const today = new Date(todayISTString + "T00:00:00"); // Create date from IST date string
 
     // First, check non-recurring tasks with passed deadlines and auto-tick them
     const nonRecurringTasks = await tasksCollection.find({
@@ -1061,7 +1090,7 @@ export async function resetAllRecurringTasks(): Promise<number> {
                   approvalStatus: "pending",
                   assignedDate: tomorrow,
                   assignedTime: "01:00",
-                  deadlineDate: tomorrow
+                  deadlineDate: today // For daily tasks, deadline is today's date
                 },
                 $unset: {
                   completedAt: "",
@@ -1098,8 +1127,13 @@ export async function resetAllRecurringTasks(): Promise<number> {
           updateFields.assignedTime = "01:00"; // 1:00 AM for next day
           
           if (task.deadlineTime) {
-            // Set deadlineDate to tomorrow (same day as assignedDate)
-            updateFields.deadlineDate = tomorrow;
+            // For daily tasks, deadlineDate should be today (not tomorrow)
+            // For weekly/monthly tasks, use tomorrow
+            if (task.taskKind === "daily") {
+              updateFields.deadlineDate = today;
+            } else {
+              updateFields.deadlineDate = tomorrow;
+            }
           }
         }
         

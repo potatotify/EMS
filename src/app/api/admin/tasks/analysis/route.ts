@@ -135,8 +135,65 @@ export async function GET(request: NextRequest) {
     const projectsCollection = db.collection("projects");
     const tasksCollection = db.collection("tasks");
 
+    // Format dates and times - defined at top level so accessible to all processing sections
+    const formatDate = (date: Date | string | undefined) => {
+      if (!date) return "";
+      const d = typeof date === "string" ? new Date(date) : date;
+      // Convert to IST (Asia/Kolkata) timezone - UTC+5:30
+      const formatter = new Intl.DateTimeFormat("en-US", {
+        timeZone: "Asia/Kolkata",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      });
+      return formatter.format(d);
+    };
+
+    const formatTime = (date: Date | string | undefined) => {
+      if (!date) return "";
+      const d = typeof date === "string" ? new Date(date) : date;
+      // Convert to IST (Asia/Kolkata) timezone - UTC+5:30
+      const formatter = new Intl.DateTimeFormat("en-US", {
+        timeZone: "Asia/Kolkata",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      });
+      return formatter.format(d);
+    };
+
+    // Calculate today's date in IST ONCE at the start of the request
+    // This ensures consistency throughout the entire request processing
+    // IMPORTANT: Always returns today's date in IST, not tomorrow's date
+    const now = new Date();
+    const istFormatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    const todayISTString = istFormatter.format(now); // Returns MM/DD/YYYY in IST (e.g., "01/18/2026")
+    
+    // Helper function that returns the pre-calculated today's date
+    // This ensures we always return the same date throughout the request
+    const getTodayInISTString = () => {
+      return todayISTString;
+    };
+    
+    // Helper function to get today's Date object in IST for deadline calculations
+    // Parses the todayISTString (MM/DD/YYYY) and creates a Date object
+    const getTodayDateInIST = (): Date => {
+      // todayISTString is in format "MM/DD/YYYY" (e.g., "01/18/2026")
+      const [month, day, year] = todayISTString.split("/").map(Number);
+      // Create date at midnight in local time (will be used for comparison)
+      // Since tickedAt is also a Date object, comparisons will work correctly
+      const date = new Date(year, month - 1, day, 0, 0, 0, 0); // month is 0-indexed
+      return date;
+    };
+
     const taskRows = await Promise.all(
       tasks.map(async (task: any) => {
+        
         // IMPORTANT: Verify task is still ticked/completed
         // If task is unticked or deleted, skip it
         const isTicked = !!(task.tickedAt || task.completedAt || task.status === "completed");
@@ -263,44 +320,25 @@ export async function GET(request: NextRequest) {
           }
         }
 
-        // Format dates and times
-        const formatDate = (date: Date | string | undefined) => {
-          if (!date) return "";
-          const d = typeof date === "string" ? new Date(date) : date;
-          // Convert to IST (Asia/Kolkata) timezone - UTC+5:30
-          const formatter = new Intl.DateTimeFormat("en-US", {
-            timeZone: "Asia/Kolkata",
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit",
-          });
-          return formatter.format(d);
-        };
-
-        const formatTime = (date: Date | string | undefined) => {
-          if (!date) return "";
-          const d = typeof date === "string" ? new Date(date) : date;
-          // Convert to IST (Asia/Kolkata) timezone - UTC+5:30
-          const formatter = new Intl.DateTimeFormat("en-US", {
-            timeZone: "Asia/Kolkata",
-            hour: "2-digit",
-            minute: "2-digit",
-            hour12: false,
-          });
-          return formatter.format(d);
-        };
-
         // Check if deadline has passed and auto-reject if needed
+        // (formatDate and formatTime are defined at top level)
         const now = new Date();
         let deadlinePassed = false;
         let deadlineDate: Date | null = null;
         
         // For recurring tasks (daily/weekly/monthly), use today's date if deadlineTime exists
         const isRecurring = ["daily", "weekly", "monthly"].includes(task.taskKind);
+        const isDaily = task.taskKind === "daily";
         
         if (task.deadlineTime) {
-          // For recurring tasks, deadlineDate should be today's date
-          if (isRecurring) {
+          // For daily tasks, ALWAYS use today's date (not what's stored in DB)
+          // For other recurring tasks, use today's date if deadlineDate not set
+          if (isDaily) {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            deadlineDate = new Date(today); // Always use today for daily tasks
+            deadlineDate.setHours(0, 0, 0, 0);
+          } else if (isRecurring) {
             const today = new Date();
             today.setHours(0, 0, 0, 0);
             deadlineDate = task.deadlineDate ? new Date(task.deadlineDate) : today;
@@ -462,7 +500,17 @@ export async function GET(request: NextRequest) {
           assignedAtTime: task.assignedTime || (task.assignedDate ? formatTime(task.assignedDate) : (task.createdAt ? formatTime(task.createdAt) : "N/A")),
           dateDue: task.dueDate ? formatDate(task.dueDate) : "N/A",
           timeDue: task.dueTime || (task.dueDate ? formatTime(task.dueDate) : "N/A"),
-          deadlineDate: task.deadlineDate ? formatDate(task.deadlineDate) : "N/A",
+          // For daily tasks, ALWAYS show today's date (not what's stored in DB)
+          deadlineDate: (() => {
+            // Check if task is daily (case-insensitive, handle both string and any other type)
+            const isDaily = task.taskKind === "daily" || String(task.taskKind || "").toLowerCase() === "daily";
+            if (isDaily) {
+              const today = getTodayInISTString();
+              return today;
+            }
+            const dbDeadline = task.deadlineDate ? formatDate(task.deadlineDate) : "N/A";
+            return dbDeadline;
+          })(),
           deadlineTime: task.deadlineTime || (task.deadlineDate ? formatTime(task.deadlineDate) : "N/A"),
           priority: task.priority || 2,
           tickedBy: tickedByName || "N/A",
@@ -593,34 +641,8 @@ export async function GET(request: NextRequest) {
           }
         }
 
-        // Format dates and times
-        const formatDate = (date: Date | string | undefined) => {
-          if (!date) return '';
-          const d = typeof date === 'string' ? new Date(date) : date;
-          // Convert to IST (Asia/Kolkata) timezone - UTC+5:30
-          const formatter = new Intl.DateTimeFormat("en-US", {
-            timeZone: "Asia/Kolkata",
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit",
-          });
-          return formatter.format(d);
-        };
-
-        const formatTime = (date: Date | string | undefined) => {
-          if (!date) return '';
-          const d = typeof date === 'string' ? new Date(date) : date;
-          // Convert to IST (Asia/Kolkata) timezone - UTC+5:30
-          const formatter = new Intl.DateTimeFormat("en-US", {
-            timeZone: "Asia/Kolkata",
-            hour: "2-digit",
-            minute: "2-digit",
-            hour12: false,
-          });
-          return formatter.format(d);
-        };
-
         // Calculate deadline date for subtask - ALWAYS use parent task's deadline (subtasks inherit deadline from parent)
+        // (formatDate and formatTime are defined at top level)
         let deadlineDate: Date | null = null;
         let deadlinePassed = false;
         const now = new Date();
@@ -762,7 +784,16 @@ export async function GET(request: NextRequest) {
           dateDue: subtask.dueDate ? formatDate(subtask.dueDate) : (parentTask?.dueDate ? formatDate(parentTask.dueDate) : "N/A"),
           timeDue: subtask.dueTime || parentTask?.dueTime || "N/A",
           // ALWAYS show parent task's deadline (subtasks inherit deadline from parent)
-          deadlineDate: parentTask?.deadlineDate ? formatDate(parentTask.deadlineDate) : "N/A",
+          // For daily parent tasks, ALWAYS show today's date (not what's stored in DB)
+          deadlineDate: (() => {
+            const parentTaskKind = (parentTask as any)?.taskKind;
+            const isParentDaily = parentTaskKind === "daily" || String(parentTaskKind || "").toLowerCase() === "daily";
+            if (parentTask && isParentDaily) {
+              const today = getTodayInISTString();
+              return today;
+            }
+            return parentTask?.deadlineDate ? formatDate(parentTask.deadlineDate) : "N/A";
+          })(),
           deadlineTime: parentTask?.deadlineTime || "N/A",
           priority: subtask.priority || parentTask?.priority || 2,
           tickedBy: tickedByName || "N/A",
@@ -908,6 +939,7 @@ export async function GET(request: NextRequest) {
 
     const completionRows = await Promise.all(
       taskCompletions.map(async (completion: any) => {
+        
         const formatDate = (date: Date | string | undefined | null) => {
           if (!date) return "";
           const d = typeof date === "string" ? new Date(date) : date;
@@ -953,9 +985,15 @@ export async function GET(request: NextRequest) {
           let shouldGetReward = false;
           
           // Calculate deadline
+          // For daily tasks, use today's date in IST (not what's in DB)
+          const isDaily = completion.taskKind === "daily" || String(completion.taskKind || "").toLowerCase() === "daily";
           let completionDeadlineDate: Date | null = null;
           if (completion.deadlineTime) {
-            if (completion.deadlineDate) {
+            if (isDaily) {
+              // For daily tasks, always use today's date in IST
+              completionDeadlineDate = getTodayDateInIST();
+              completionDeadlineDate.setHours(0, 0, 0, 0);
+            } else if (completion.deadlineDate) {
               completionDeadlineDate = new Date(completion.deadlineDate);
               completionDeadlineDate.setHours(0, 0, 0, 0);
             } else {
@@ -964,6 +1002,10 @@ export async function GET(request: NextRequest) {
             }
             const [hours, minutes] = completion.deadlineTime.split(":");
             completionDeadlineDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+          } else if (isDaily) {
+            // For daily tasks without deadlineTime, use today 23:59:59
+            completionDeadlineDate = getTodayDateInIST();
+            completionDeadlineDate.setHours(23, 59, 59, 999);
           } else if (completion.deadlineDate) {
             completionDeadlineDate = new Date(completion.deadlineDate);
             completionDeadlineDate.setHours(23, 59, 59, 999);
@@ -1129,7 +1171,17 @@ export async function GET(request: NextRequest) {
           assignedAtTime,
           dateDue: completion.dueDate ? formatDate(completion.dueDate) : "N/A",
           timeDue: completion.dueTime || "N/A",
-          deadlineDate: completion.deadlineDate ? formatDate(completion.deadlineDate) : "N/A",
+          // For daily tasks, ALWAYS show today's date (not what's stored in completion record)
+          deadlineDate: (() => {
+            const completionTaskKind = completion.taskKind;
+            const isCompletionDaily = completionTaskKind === "daily" || String(completionTaskKind || "").toLowerCase() === "daily";
+            if (isCompletionDaily) {
+              const today = getTodayInISTString();
+              return today;
+            }
+            const dbDeadline = completion.deadlineDate ? formatDate(completion.deadlineDate) : "N/A";
+            return dbDeadline;
+          })(),
           deadlineTime: completion.deadlineTime || "N/A",
           priority: completion.priority || 2,
           tickedBy: completion.notTicked ? "Not Ticked" : (completion.completedByName || "N/A"),
@@ -1258,9 +1310,15 @@ export async function GET(request: NextRequest) {
         
         if (completion.tickedAt) {
           // Calculate deadline (inherit from parent task)
+          // For daily tasks, use today's date in IST (not what's in DB)
+          const isDaily = completion.taskKind === "daily" || String(completion.taskKind || "").toLowerCase() === "daily";
           let completionDeadlineDate: Date | null = null;
           if (completion.deadlineTime) {
-            if (completion.deadlineDate) {
+            if (isDaily) {
+              // For daily tasks, always use today's date in IST
+              completionDeadlineDate = getTodayDateInIST();
+              completionDeadlineDate.setHours(0, 0, 0, 0);
+            } else if (completion.deadlineDate) {
               completionDeadlineDate = new Date(completion.deadlineDate);
               completionDeadlineDate.setHours(0, 0, 0, 0);
             } else if (completion.tickedAt) {
@@ -1271,6 +1329,10 @@ export async function GET(request: NextRequest) {
               const [hours, minutes] = completion.deadlineTime.split(":");
               completionDeadlineDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
             }
+          } else if (isDaily) {
+            // For daily tasks without deadlineTime, use today 23:59:59
+            completionDeadlineDate = getTodayDateInIST();
+            completionDeadlineDate.setHours(23, 59, 59, 999);
           } else if (completion.deadlineDate) {
             completionDeadlineDate = new Date(completion.deadlineDate);
             completionDeadlineDate.setHours(23, 59, 59, 999);
@@ -1336,7 +1398,17 @@ export async function GET(request: NextRequest) {
           assignedAtTime: completion.assignedTime || (completion.assignedDate ? formatTime(completion.assignedDate) : 'N/A'),
           dateDue: completion.dueDate ? formatDate(completion.dueDate) : 'N/A',
           timeDue: completion.dueTime || 'N/A',
-          deadlineDate: completion.deadlineDate ? formatDate(completion.deadlineDate) : 'N/A',
+          // For daily tasks, ALWAYS show today's date (not what's stored in completion record)
+          deadlineDate: (() => {
+            const completionTaskKind = completion.taskKind;
+            const isCompletionDaily = completionTaskKind === "daily" || String(completionTaskKind || "").toLowerCase() === "daily";
+            if (isCompletionDaily) {
+              const today = getTodayInISTString();
+              return today;
+            }
+            const dbDeadline = completion.deadlineDate ? formatDate(completion.deadlineDate) : 'N/A';
+            return dbDeadline;
+          })(),
           deadlineTime: completion.deadlineTime || 'N/A',
           priority: 2,
           tickedBy: completion.completedByName || 'N/A',
@@ -1462,6 +1534,7 @@ export async function GET(request: NextRequest) {
     
     // Apply pagination
     const paginatedData = analysisData.slice(skip, skip + limit);
+
 
     return NextResponse.json({
       success: true,

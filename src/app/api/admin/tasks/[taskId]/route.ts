@@ -278,7 +278,21 @@ export async function PATCH(
         ? body.dueTime 
         : undefined;
     }
-    if (body.deadlineDate !== undefined) {
+    // For daily tasks, ALWAYS set deadlineDate to today in IST (ignore provided value)
+    // Check both current taskKind and if it's being changed to daily
+    const isDaily = task.taskKind === "daily" || body.taskKind === "daily";
+    if (isDaily && (task.deadlineTime || body.deadlineTime)) {
+      // Daily task - always use today's date in IST
+      const now = new Date();
+      const istFormatter = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Kolkata",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      });
+      const todayISTString = istFormatter.format(now); // Returns YYYY-MM-DD in IST
+      task.deadlineDate = new Date(todayISTString + "T00:00:00");
+    } else if (body.deadlineDate !== undefined) {
       task.deadlineDate = body.deadlineDate && body.deadlineDate.trim() !== "" 
         ? new Date(body.deadlineDate) 
         : undefined;
@@ -518,7 +532,22 @@ export async function PATCH(
             if (body.assignedTime !== undefined) freshTask.assignedTime = task.assignedTime;
             if (body.dueDate !== undefined) freshTask.dueDate = task.dueDate;
             if (body.dueTime !== undefined) freshTask.dueTime = task.dueTime;
-            if (body.deadlineDate !== undefined) freshTask.deadlineDate = task.deadlineDate;
+            if (body.deadlineDate !== undefined) {
+              // For daily tasks, ALWAYS set deadlineDate to today in IST
+              if (freshTask.taskKind === "daily" && freshTask.deadlineTime) {
+                const now = new Date();
+                const istFormatter = new Intl.DateTimeFormat("en-CA", {
+                  timeZone: "Asia/Kolkata",
+                  year: "numeric",
+                  month: "2-digit",
+                  day: "2-digit",
+                });
+                const todayISTString = istFormatter.format(now);
+                freshTask.deadlineDate = new Date(todayISTString + "T00:00:00");
+              } else {
+                freshTask.deadlineDate = task.deadlineDate;
+              }
+            }
             if (body.deadlineTime !== undefined) freshTask.deadlineTime = task.deadlineTime;
             
             // Assignment fields

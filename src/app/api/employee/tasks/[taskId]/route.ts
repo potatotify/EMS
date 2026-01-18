@@ -199,11 +199,41 @@ export async function PATCH(
     if (body.dueTime !== undefined) {
       task.dueTime = body.dueTime || undefined;
     }
-    if (body.deadlineDate !== undefined) {
+    if (body.taskKind !== undefined) {
+      task.taskKind = body.taskKind;
+    }
+    
+    // For daily tasks, ALWAYS set deadlineDate to today in IST (ignore provided value)
+    // Check both current taskKind and if it's being changed to daily
+    const isDaily = task.taskKind === "daily" || body.taskKind === "daily";
+    if (isDaily && (task.deadlineTime || body.deadlineTime)) {
+      // Daily task - always use today's date in IST
+      const now = new Date();
+      const istFormatter = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Kolkata",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      });
+      const todayISTString = istFormatter.format(now); // Returns YYYY-MM-DD in IST
+      task.deadlineDate = new Date(todayISTString + "T00:00:00");
+    } else if (body.deadlineDate !== undefined) {
       task.deadlineDate = body.deadlineDate ? new Date(body.deadlineDate) : undefined;
     }
     if (body.deadlineTime !== undefined) {
       task.deadlineTime = body.deadlineTime || undefined;
+      // If deadlineTime is set and task is daily, also update deadlineDate to today
+      if (isDaily && body.deadlineTime) {
+        const now = new Date();
+        const istFormatter = new Intl.DateTimeFormat("en-CA", {
+          timeZone: "Asia/Kolkata",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        });
+        const todayISTString = istFormatter.format(now);
+        task.deadlineDate = new Date(todayISTString + "T00:00:00");
+      }
     }
     if (body.taskKind !== undefined) {
       task.taskKind = body.taskKind;

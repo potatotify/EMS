@@ -74,6 +74,14 @@ export default function TaskAnalysisSheet() {
       const response = await fetch(`/api/admin/tasks/analysis?${params.toString()}`, { cache: "no-store" });
       const data = await response.json();
       if (response.ok) {
+        // Debug: Log daily tasks received from API
+        const dailyTasks = (data.tasks || []).filter((t: TaskAnalysisData) => t.taskKind === "daily");
+        if (dailyTasks.length > 0) {
+          console.log(`[Frontend] Received ${dailyTasks.length} daily tasks from API:`);
+          dailyTasks.forEach((task: TaskAnalysisData) => {
+            console.log(`  - Task ${task._id}: deadlineDate="${task.deadlineDate}", taskKind="${task.taskKind}"`);
+          });
+        }
         setTasks(data.tasks || []);
         setTotalTasks(data.total || 0);
         setShowingTasks(data.showing || data.tasks?.length || 0);
