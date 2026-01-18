@@ -541,6 +541,7 @@ export async function GET(request: NextRequest) {
           customFields: task.customFields || [],
           customFieldValues: task.customFieldValues || {},
           createdByEmployee: task.createdByEmployee || false,
+          timeSpent: task.timeSpent || null, // Hours worked on task
         };
       })
     );
@@ -824,6 +825,7 @@ export async function GET(request: NextRequest) {
           parentTaskId: parentTask?._id.toString() || '',
           parentTaskTitle: parentTask?.title || 'Unknown Task',
           isSubtask: true,
+          timeSpent: subtask.timeSpent || null, // Hours worked on subtask
         };
       })
     );
@@ -1209,6 +1211,7 @@ export async function GET(request: NextRequest) {
           projectDeleted,
           projectExists,
           taskId: completion.taskId ? completion.taskId.toString() : null, // Include original taskId if available
+          timeSpent: completion.timeSpent || null, // Hours worked on task (from completion record)
         };
       })
     );
@@ -1434,6 +1437,7 @@ export async function GET(request: NextRequest) {
           isHistorical: completion.taskKind !== "one-time", // Historical only for recurring tasks
           isSubtask: true,
           parentTaskTitle: completion.parentTaskTitle,
+          timeSpent: completion.timeSpent || null, // Hours worked on subtask (from completion record)
         };
       })
     );

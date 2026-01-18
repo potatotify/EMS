@@ -216,15 +216,57 @@ export default function SubtaskModal({
   };
 
   const handleToggleSubtask = async (subtaskId: string, currentTicked: boolean) => {
+    const newTicked = !currentTicked;
+    
+    // Find the subtask to check assignment
+    const subtask = subtasks.find(s => s._id === subtaskId);
+    if (!subtask) {
+      setError("Subtask not found");
+      return;
+    }
+    
+    // Check if user is the assignee or admin/lead before allowing toggle
+    const isAssignee = subtask.assignee?._id === currentUserId;
+    const canManageSubtasks = isAdmin || isLeadAssignee;
+    
+    if (!isAssignee && !canManageSubtasks) {
+      setError("You can only tick subtasks assigned to you");
+      return;
+    }
+    
+    // If completing the subtask, ask for time spent (only if user is the assignee)
+    let timeSpent: number | undefined;
+    if (newTicked) {
+      // Only ask for hours if the user is the assignee (not admin/lead)
+      if (isAssignee) {
+        const timeInput = prompt("How many hours did you spend on this subtask?");
+        if (timeInput === null) {
+          // User cancelled
+          return;
+        }
+        const parsedTime = parseFloat(timeInput);
+        if (isNaN(parsedTime) || parsedTime < 0) {
+          alert("Please enter a valid number of hours (e.g., 2.5 for 2 hours 30 minutes)");
+          return;
+        }
+        timeSpent = parsedTime;
+      }
+    }
+    
     setLoading(true);
     setError("");
     try {
+      const requestBody: any = {
+        ticked: newTicked,
+      };
+      if (timeSpent !== undefined) {
+        requestBody.timeSpent = timeSpent;
+      }
+      
       const response = await fetch(`/api/subtasks/${subtaskId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ticked: !currentTicked,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       const data = await response.json();

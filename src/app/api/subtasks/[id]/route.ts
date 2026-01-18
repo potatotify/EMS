@@ -19,7 +19,7 @@ export async function PATCH(
 
     const { id } = await params;
     const body = await request.json();
-    const { ticked } = body;
+    const { ticked, timeSpent } = body;
 
     await dbConnect();
     const client = await clientPromise;
@@ -111,6 +111,14 @@ export async function PATCH(
       status: ticked ? "completed" : "pending",
       completedAt: ticked ? new Date() : null,
     };
+    
+    // Add timeSpent if provided
+    if (ticked && timeSpent !== undefined) {
+      updateData.timeSpent = timeSpent;
+    } else if (!ticked) {
+      // Clear timeSpent when unticking
+      updateData.timeSpent = null;
+    }
     
     // Automatically set approval status based on deadline
     if (ticked) {
@@ -222,6 +230,7 @@ export async function PATCH(
             completedByName: completedByName,
             tickedAt: result.tickedAt || new Date(),
             completedAt: result.completedAt || new Date(),
+            timeSpent: result.timeSpent !== undefined ? result.timeSpent : undefined,
             // Inherit bonus/fine from parent task
             bonusPoints: parentTaskAny.bonusPoints !== undefined && parentTaskAny.bonusPoints !== null ? parentTaskAny.bonusPoints : 0,
             bonusCurrency: parentTaskAny.bonusCurrency !== undefined && parentTaskAny.bonusCurrency !== null ? parentTaskAny.bonusCurrency : 0,

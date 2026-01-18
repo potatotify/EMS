@@ -60,6 +60,7 @@ export interface ISubtask extends Document {
   completedAt?: Date;
   completedBy?: mongoose.Types.ObjectId;
   tickedAt?: Date; // When employee ticks/completes the subtask
+  timeSpent?: number; // Time spent on subtask in hours
   
   // Ordering
   order: number;
@@ -226,6 +227,10 @@ const SubtaskSchema = new Schema<ISubtask>(
     },
     tickedAt: {
       type: Date,
+    },
+    timeSpent: {
+      type: Number,
+      min: 0,
     },
     order: {
       type: Number,

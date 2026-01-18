@@ -16,6 +16,7 @@ export interface ISubtaskCompletion extends Document {
   tickedAt?: Date;
   completedAt?: Date;
   createdAt?: Date;
+  timeSpent?: number; // Time spent on subtask in hours
   // Bonus/fine (inherited from parent task)
   bonusPoints?: number;
   bonusCurrency?: number;
@@ -80,6 +81,7 @@ const SubtaskCompletionSchema = new Schema<ISubtaskCompletion>(
     completedByName: String,
     tickedAt: Date,
     completedAt: Date,
+    timeSpent: Number,
     bonusPoints: Number,
     bonusCurrency: Number,
     penaltyPoints: Number,

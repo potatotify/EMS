@@ -31,6 +31,7 @@ interface TaskAnalysisData {
   approvalStatus: string;
   approvedBy: string;
   deadlinePassed?: boolean;
+  timeSpent?: number | null; // Hours worked on task/subtask
   customFields?: Array<{
     name: string;
     type: "number" | "string" | "boolean" | "date";
@@ -153,6 +154,7 @@ export default function TaskAnalysisSheet() {
       "Priority",
       "Ticked By",
       "Ticked Time",
+      "Hours Worked",
       "Rewards Point",
       "Rewards Currency",
       "Penalty Point",
@@ -201,6 +203,7 @@ export default function TaskAnalysisSheet() {
           task.priority,
           `"${task.tickedBy}"`,
           `"${task.tickedTime}"`,
+          task.timeSpent != null ? task.timeSpent : "",
           task.rewardsPoint,
           task.rewardsCurrency || 0,
           task.penaltyPoint == null ? "" : task.penaltyPoint,
@@ -366,6 +369,9 @@ export default function TaskAnalysisSheet() {
                   Ticked Time
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-neutral-700 uppercase tracking-wider border-r border-neutral-200 min-w-[100px]">
+                  Hours Worked
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-neutral-700 uppercase tracking-wider border-r border-neutral-200 min-w-[100px]">
                   Rewards Point
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-neutral-700 uppercase tracking-wider border-r border-neutral-200 min-w-[120px]">
@@ -393,7 +399,7 @@ export default function TaskAnalysisSheet() {
             <tbody className="bg-white divide-y divide-neutral-200">
               {filteredTasks.length === 0 ? (
                 <tr>
-                  <td colSpan={19 + customFieldNames.length} className="px-4 py-8 text-center text-neutral-500">
+                  <td colSpan={20 + customFieldNames.length} className="px-4 py-8 text-center text-neutral-500">
                     No tasks found
                   </td>
                 </tr>
@@ -478,6 +484,15 @@ export default function TaskAnalysisSheet() {
                     </td>
                     <td className="px-4 py-3 text-sm text-neutral-700 border-r border-neutral-200">
                       {task.tickedTime || "-"}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-neutral-700 border-r border-neutral-200">
+                      {task.timeSpent != null ? (
+                        <span className="text-blue-600 font-medium">
+                          {task.timeSpent} hrs
+                        </span>
+                      ) : (
+                        <span className="text-neutral-400">-</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-sm text-neutral-700 border-r border-neutral-200">
                       <span className="text-green-600 font-medium">

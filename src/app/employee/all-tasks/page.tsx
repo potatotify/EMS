@@ -702,15 +702,76 @@ export default function AllTasksPage(props: AllTasksPageProps = {}) {
   const handleToggleSubtask = async (subtaskId: string, currentTicked: boolean) => {
     const newTicked = !currentTicked;
     
+    // Find the subtask to check assignment
+    let subtask: Subtask | null = null;
+    for (const projectName in tasks) {
+      for (const sectionName in tasks[projectName]) {
+        for (const task of tasks[projectName][sectionName]) {
+          if (task.subtasks) {
+            const foundSubtask = task.subtasks.find(s => s._id === subtaskId);
+            if (foundSubtask) {
+              subtask = foundSubtask;
+              break;
+            }
+          }
+        }
+        if (subtask) break;
+      }
+      if (subtask) break;
+    }
+    
+    if (!subtask) {
+      alert("Subtask not found");
+      return;
+    }
+    
+    // Check if user is the assignee
+    const currentUserId = session?.user?.id;
+    if (!currentUserId) {
+      alert("You must be logged in to tick subtasks");
+      return;
+    }
+    
+    const isAssignee = subtask.assignee?._id === currentUserId || 
+                       subtask.assignee?._id?.toString() === currentUserId?.toString();
+    
+    if (!isAssignee) {
+      alert("You can only tick subtasks assigned to you");
+      return;
+    }
+    
+    // If completing the subtask, ask for time spent (only if user is the assignee)
+    let timeSpent: number | undefined;
+    if (newTicked) {
+      const timeInput = prompt("How many hours did you spend on this subtask?");
+      if (timeInput === null) {
+        // User cancelled
+        return;
+      }
+      const parsedTime = parseFloat(timeInput);
+      if (isNaN(parsedTime) || parsedTime < 0) {
+        alert("Please enter a valid number of hours (e.g., 2.5 for 2 hours 30 minutes)");
+        return;
+      }
+      timeSpent = parsedTime;
+    }
+    
     // OPTIMISTIC UPDATE: Update UI immediately
     updateSubtaskInState(subtaskId, { ticked: newTicked });
     
     // Make API call in the background
     try {
+      const requestBody: any = {
+        ticked: newTicked,
+      };
+      if (timeSpent !== undefined) {
+        requestBody.timeSpent = timeSpent;
+      }
+      
       const response = await fetch(`/api/subtasks/${subtaskId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticked: newTicked }),
+        body: JSON.stringify(requestBody),
       });
 
       if (response.ok) {
@@ -719,8 +780,8 @@ export default function AllTasksPage(props: AllTasksPageProps = {}) {
       } else {
         // API call failed - rollback the optimistic update
         updateSubtaskInState(subtaskId, { ticked: currentTicked });
-        console.error("Failed to update subtask");
-        alert("Failed to update subtask. Please try again.");
+        const errorData = await response.json().catch(() => ({ error: "Failed to update subtask" }));
+        alert(errorData.error || "Failed to update subtask. Please try again.");
       }
     } catch (error) {
       // Network error or other exception - rollback the optimistic update
