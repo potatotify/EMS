@@ -1141,6 +1141,9 @@ export async function resetAllRecurringTasks(): Promise<number> {
           if (check.shouldReset && deadlinePassed) {
             const assignedTo = task.assignedTo || (task.assignees && task.assignees.length > 0 ? task.assignees[0] : null);
             
+            // Use the function-level 'today' variable (recreate from todayISTString to avoid scope issues)
+            const todayDate = new Date(todayISTString + "T00:00:00");
+            
             // Create a "not ticked" completion record with fine
             // This shows in task analysis as "not ticked" with fine applied
             await saveTaskCompletionHistory({
@@ -1152,7 +1155,7 @@ export async function resetAllRecurringTasks(): Promise<number> {
               approvalStatus: "deadline_passed", // Mark as deadline passed for fine
               approvedAt: now,
               deadlineDate: deadlineDate, // The deadline that passed
-              assignedDate: task.assignedDate || today,
+              assignedDate: task.assignedDate || todayDate,
               assignedTime: task.assignedTime || "01:00",
             });
             
@@ -1165,7 +1168,7 @@ export async function resetAllRecurringTasks(): Promise<number> {
                   approvalStatus: "pending",
                   assignedDate: tomorrow,
                   assignedTime: "01:00",
-                  deadlineDate: today // For daily tasks, deadline is today's date
+                  deadlineDate: todayDate // For daily tasks, deadline is today's date
                 },
                 $unset: {
                   completedAt: "",
@@ -1204,8 +1207,9 @@ export async function resetAllRecurringTasks(): Promise<number> {
           if (task.deadlineTime) {
             // For daily tasks, deadlineDate should be today (not tomorrow)
             // For weekly/monthly tasks, use tomorrow
+            // Use the function-level 'today' variable declared at the top
             if (task.taskKind === "daily") {
-              updateFields.deadlineDate = today;
+              updateFields.deadlineDate = new Date(todayISTString + "T00:00:00");
             } else {
               updateFields.deadlineDate = tomorrow;
             }
