@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { authOptions } from "../../../auth/[...nextauth]/route";
+import { authOptions } from "../../auth/[...nextauth]/route";
 import { dbConnect } from "@/lib/mongodb";
 import { ObjectId } from "mongodb";
 import clientPromise from "@/lib/mongodb";
@@ -368,18 +368,21 @@ export async function POST(request: NextRequest) {
             }
           );
 
-          // Reset all subtasks
+          // Reset all subtasks - uncheck all completed ones
+          const taskIdObj = task._id instanceof ObjectId ? task._id : new ObjectId(task._id);
           await subtasksCollection.updateMany(
-            { taskId: task._id },
+            { taskId: taskIdObj },
             {
               $set: {
                 status: "pending",
+                ticked: false, // CRITICAL: Reset the ticked boolean field
                 approvalStatus: "pending"
               },
               $unset: {
                 completedAt: "",
                 completedBy: "",
-                tickedAt: ""
+                tickedAt: "",
+                timeSpent: ""
               }
             }
           );
