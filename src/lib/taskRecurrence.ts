@@ -587,97 +587,96 @@ export async function resetRecurringTasksForProject(projectId: string): Promise<
           await saveSubtaskCompletionHistory(subtask, task);
         }
         
-        // Check for incomplete subtasks with passed deadlines and auto-tick them
+        // Get all incomplete/pending subtasks for this task
+        // These need to be saved as deadline_passed before reset so fines are applied
         const incompleteSubtasks = await subtasksCollection.find({
           taskId: task._id,
           status: "pending"
         }).toArray();
         
-        for (const subtask of incompleteSubtasks) {
-          const subtaskAny = subtask as any;
-          if (subtaskAny.deadlineTime) {
-            // Use today's date for fine attribution
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            
-            let subtaskDeadlineDate: Date;
-            if (subtaskAny.deadlineDate) {
-              subtaskDeadlineDate = new Date(subtaskAny.deadlineDate);
-              subtaskDeadlineDate.setHours(0, 0, 0, 0);
-            } else {
-              // Use today's date for all recurring tasks
-              subtaskDeadlineDate = new Date(today);
-              subtaskDeadlineDate.setHours(0, 0, 0, 0);
-            }
-            
-            const [hours, minutes] = subtaskAny.deadlineTime.split(":");
-            subtaskDeadlineDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
-            
-            // Check if deadline has passed
-            if (now > subtaskDeadlineDate) {
-              // Check if subtask should be reset (for daily/weekly/monthly)
-              if (["daily", "weekly", "monthly"].includes(task.taskKind)) {
-                const check = shouldResetRecurringTask(
-                  task.taskKind as string,
-                  subtaskDeadlineDate,
-                  patternToUse
-                );
-                
-                if (check.shouldReset) {
-                  // Auto-tick the subtask and mark as deadline_passed
-                  // Use today's date for fine attribution (the day the cron runs)
-                  const actualDeadlineDate = new Date(today);
-                  const [h, m] = subtaskAny.deadlineTime.split(":");
-                  actualDeadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
-                  
-                  // Save as SubtaskCompletion record before resetting
-                  await saveSubtaskCompletionHistory({
-                    ...subtask,
-                    status: "completed",
-                    tickedAt: actualDeadlineDate,
-                    completedAt: actualDeadlineDate,
-                    completedBy: subtaskAny.assignee,
-                    approvalStatus: "deadline_passed",
-                    deadlineDate: actualDeadlineDate,
-                  }, task);
-                  
-                  // Reset the subtask for next cycle
-                  await subtasksCollection.updateOne(
-                    { _id: subtask._id },
-                    {
-                      $set: {
-                        status: "pending",
-                        approvalStatus: "pending",
-                      },
-                      $unset: {
-                        completedAt: "",
-                        completedBy: "",
-                        tickedAt: "",
-                      }
-                    }
-                  );
-                  
-                  console.log(`[Task Recurrence] Auto-ticked incomplete subtask ${subtask._id} - deadline passed, marked as deadline_passed. Fine attributed to: ${actualDeadlineDate.toISOString()}`);
-                }
-              }
-            }
-          }
+        // Calculate deadline date for incomplete subtasks
+        const taskAny = task as any;
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        // Get deadline date from task (for daily tasks, use today's date in IST)
+        let baseDeadlineDate: Date;
+        if (taskAny.deadlineDate) {
+          baseDeadlineDate = new Date(taskAny.deadlineDate);
+          baseDeadlineDate.setHours(0, 0, 0, 0);
+        } else {
+          baseDeadlineDate = new Date(today);
+          baseDeadlineDate.setHours(0, 0, 0, 0);
         }
         
-        // Reset all subtasks for this task
-        await subtasksCollection.updateMany(
-          { taskId: task._id },
+        // Get deadline time (from subtask or parent task)
+        const deadlineTime = taskAny.deadlineTime || "23:59";
+        const [deadlineHours, deadlineMinutes] = deadlineTime.split(":");
+        baseDeadlineDate.setHours(parseInt(deadlineHours), parseInt(deadlineMinutes), 0, 0);
+        
+        // Save all incomplete subtasks as deadline_passed before resetting
+        for (const subtask of incompleteSubtasks) {
+          const subtaskAny = subtask as any;
+          
+          // Use subtask's deadline if available, otherwise use parent task's deadline
+          let subtaskDeadlineDate: Date;
+          const subtaskDeadlineTime = subtaskAny.deadlineTime || deadlineTime;
+          
+          if (subtaskAny.deadlineDate) {
+            subtaskDeadlineDate = new Date(subtaskAny.deadlineDate);
+            subtaskDeadlineDate.setHours(0, 0, 0, 0);
+          } else {
+            subtaskDeadlineDate = new Date(baseDeadlineDate);
+            subtaskDeadlineDate.setHours(0, 0, 0, 0);
+          }
+          
+          const [h, m] = subtaskDeadlineTime.split(":");
+          subtaskDeadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+          
+          // Save as SubtaskCompletion record with deadline_passed status
+          // This ensures fines are applied to employees who didn't complete their subtasks
+          await saveSubtaskCompletionHistory({
+            ...subtask,
+            status: "pending", // Keep as pending (not completed)
+            tickedAt: null, // Not ticked
+            completedAt: null, // Not completed
+            completedBy: subtaskAny.assignee || null,
+            approvalStatus: "deadline_passed", // Mark as deadline passed for fine
+            deadlineDate: subtaskDeadlineDate,
+            deadlineTime: subtaskDeadlineTime,
+          }, task);
+          
+          console.log(`[Task Recurrence] Saved incomplete subtask ${subtask._id} as deadline_passed before reset. Fine will be applied.`);
+        }
+        
+        // Reset all subtasks for this task - uncheck all completed ones
+        // Ensure taskId is properly formatted as ObjectId for matching
+        const taskIdObj = task._id instanceof ObjectId ? task._id : new ObjectId(task._id);
+        
+        // CRITICAL: Also reset the 'ticked' boolean field which indicates if subtask is checked
+        const subtaskResetResult = await subtasksCollection.updateMany(
+          { taskId: taskIdObj },
           {
             $set: {
-              status: "pending"
+              status: "pending",
+              ticked: false, // CRITICAL: Reset the ticked boolean field
+              approvalStatus: "pending"
             },
             $unset: {
               completedAt: "",
               completedBy: "",
-              tickedAt: ""
+              tickedAt: "",
+              timeSpent: ""
             }
           }
         );
+        
+        // Log the reset result for debugging
+        if (subtaskResetResult.modifiedCount > 0) {
+          console.log(`[Task Recurrence] Reset ${subtaskResetResult.modifiedCount} subtask(s) for task ${task._id} (matched: ${subtaskResetResult.matchedCount})`);
+        } else if (subtaskResetResult.matchedCount > 0) {
+          console.log(`[Task Recurrence] Warning: Matched ${subtaskResetResult.matchedCount} subtask(s) but modified 0 for task ${task._id}`);
+        }
         
         resetCount++;
         console.log(`[Task Recurrence] Reset task ${task._id} and its subtasks (${task.taskKind})`);
@@ -870,20 +869,96 @@ export async function resetRecurringTasksForUser(userId: string): Promise<number
           await saveSubtaskCompletionHistory(subtask, task);
         }
         
-        // Reset all subtasks for this task
-        await subtasksCollection.updateMany(
-          { taskId: task._id },
+        // Get all incomplete/pending subtasks for this task
+        // These need to be saved as deadline_passed before reset so fines are applied
+        const incompleteSubtasks = await subtasksCollection.find({
+          taskId: task._id,
+          status: "pending"
+        }).toArray();
+        
+        // Calculate deadline date for incomplete subtasks
+        const taskAny = task as any;
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        // Get deadline date from task (for daily tasks, use today's date in IST)
+        let baseDeadlineDate: Date;
+        if (taskAny.deadlineDate) {
+          baseDeadlineDate = new Date(taskAny.deadlineDate);
+          baseDeadlineDate.setHours(0, 0, 0, 0);
+        } else {
+          baseDeadlineDate = new Date(today);
+          baseDeadlineDate.setHours(0, 0, 0, 0);
+        }
+        
+        // Get deadline time (from subtask or parent task)
+        const deadlineTime = taskAny.deadlineTime || "23:59";
+        const [deadlineHours, deadlineMinutes] = deadlineTime.split(":");
+        baseDeadlineDate.setHours(parseInt(deadlineHours), parseInt(deadlineMinutes), 0, 0);
+        
+        // Save all incomplete subtasks as deadline_passed before resetting
+        for (const subtask of incompleteSubtasks) {
+          const subtaskAny = subtask as any;
+          
+          // Use subtask's deadline if available, otherwise use parent task's deadline
+          let subtaskDeadlineDate: Date;
+          const subtaskDeadlineTime = subtaskAny.deadlineTime || deadlineTime;
+          
+          if (subtaskAny.deadlineDate) {
+            subtaskDeadlineDate = new Date(subtaskAny.deadlineDate);
+            subtaskDeadlineDate.setHours(0, 0, 0, 0);
+          } else {
+            subtaskDeadlineDate = new Date(baseDeadlineDate);
+            subtaskDeadlineDate.setHours(0, 0, 0, 0);
+          }
+          
+          const [h, m] = subtaskDeadlineTime.split(":");
+          subtaskDeadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+          
+          // Save as SubtaskCompletion record with deadline_passed status
+          // This ensures fines are applied to employees who didn't complete their subtasks
+          await saveSubtaskCompletionHistory({
+            ...subtask,
+            status: "pending", // Keep as pending (not completed)
+            tickedAt: null, // Not ticked
+            completedAt: null, // Not completed
+            completedBy: subtaskAny.assignee || null,
+            approvalStatus: "deadline_passed", // Mark as deadline passed for fine
+            deadlineDate: subtaskDeadlineDate,
+            deadlineTime: subtaskDeadlineTime,
+          }, task);
+          
+          console.log(`[Task Recurrence] Saved incomplete subtask ${subtask._id} as deadline_passed before reset. Fine will be applied.`);
+        }
+        
+        // Reset all subtasks for this task - uncheck all completed ones
+        // Ensure taskId is properly formatted as ObjectId for matching
+        const taskIdObj = task._id instanceof ObjectId ? task._id : new ObjectId(task._id);
+        
+        // CRITICAL: Also reset the 'ticked' boolean field which indicates if subtask is checked
+        const subtaskResetResult = await subtasksCollection.updateMany(
+          { taskId: taskIdObj },
           {
             $set: {
-              status: "pending"
+              status: "pending",
+              ticked: false, // CRITICAL: Reset the ticked boolean field
+              approvalStatus: "pending"
             },
             $unset: {
               completedAt: "",
               completedBy: "",
-              tickedAt: ""
+              tickedAt: "",
+              timeSpent: ""
             }
           }
         );
+        
+        // Log the reset result for debugging
+        if (subtaskResetResult.modifiedCount > 0) {
+          console.log(`[Task Recurrence] Reset ${subtaskResetResult.modifiedCount} subtask(s) for task ${task._id} (matched: ${subtaskResetResult.matchedCount})`);
+        } else if (subtaskResetResult.matchedCount > 0) {
+          console.log(`[Task Recurrence] Warning: Matched ${subtaskResetResult.matchedCount} subtask(s) but modified 0 for task ${task._id}`);
+        }
         
         resetCount++;
         console.log(`[Task Recurrence] Reset task ${task._id} and its subtasks (${task.taskKind})`);
@@ -1163,102 +1238,101 @@ export async function resetAllRecurringTasks(): Promise<number> {
           await saveSubtaskCompletionHistory(subtask, task);
         }
         
-        // Check for incomplete subtasks with passed deadlines and auto-tick them
-        // Subtasks inherit deadline from parent task
+        // Get all incomplete/pending subtasks for this task
+        // These need to be saved as deadline_passed before reset so fines are applied
         const incompleteSubtasks = await subtasksCollection.find({
           taskId: task._id,
           status: "pending"
         }).toArray();
         
-        for (const subtask of incompleteSubtasks) {
-          const subtaskAny = subtask as any;
-          const taskAny = task as any;
-          
-          // Use parent task's deadline if subtask doesn't have one
-          const deadlineTime = subtaskAny.deadlineTime || taskAny.deadlineTime;
-          if (deadlineTime) {
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            
-            let subtaskDeadlineDate: Date;
-            // Use subtask deadlineDate if exists, otherwise use parent task's deadlineDate or assignedDate
-            if (subtaskAny.deadlineDate) {
-              subtaskDeadlineDate = new Date(subtaskAny.deadlineDate);
-              subtaskDeadlineDate.setHours(0, 0, 0, 0);
-            } else if (taskAny.deadlineDate) {
-              subtaskDeadlineDate = new Date(taskAny.deadlineDate);
-              subtaskDeadlineDate.setHours(0, 0, 0, 0);
-            } else if (taskAny.assignedDate) {
-              // For recurring tasks, use assignedDate
-              subtaskDeadlineDate = new Date(taskAny.assignedDate);
-              subtaskDeadlineDate.setHours(0, 0, 0, 0);
-            } else {
-              subtaskDeadlineDate = new Date(today);
-              subtaskDeadlineDate.setHours(0, 0, 0, 0);
-            }
-            
-            const [hours, minutes] = deadlineTime.split(":");
-            subtaskDeadlineDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
-            
-            if (now > subtaskDeadlineDate) {
-              if (["daily", "weekly", "monthly"].includes(task.taskKind)) {
-                const check = shouldResetRecurringTask(
-                  task.taskKind as string,
-                  subtaskDeadlineDate,
-                  patternToUse
-                );
-                
-                if (check.shouldReset) {
-                  const actualDeadlineDate = new Date(subtaskDeadlineDate);
-                  const assignedTo = subtaskAny.assignee || (subtaskAny.assignees && subtaskAny.assignees.length > 0 ? subtaskAny.assignees[0] : null);
-                  
-                  await saveSubtaskCompletionHistory({
-                    ...subtask,
-                    status: "completed",
-                    tickedAt: actualDeadlineDate,
-                    completedAt: actualDeadlineDate,
-                    completedBy: assignedTo,
-                    approvalStatus: "deadline_passed",
-                    deadlineDate: actualDeadlineDate,
-                    deadlineTime: deadlineTime,
-                  }, task);
-                  
-                  await subtasksCollection.updateOne(
-                    { _id: subtask._id },
-                    {
-                      $set: {
-                        status: "pending",
-                        approvalStatus: "pending",
-                      },
-                      $unset: {
-                        completedAt: "",
-                        completedBy: "",
-                        tickedAt: "",
-                      }
-                    }
-                  );
-                  
-                  console.log(`[Task Recurrence] Auto-ticked incomplete subtask ${subtask._id} - deadline passed, marked as deadline_passed. Fine attributed to: ${actualDeadlineDate.toISOString()}`);
-                }
-              }
-            }
-          }
+        // Calculate deadline date for incomplete subtasks
+        const taskAny = task as any;
+        
+        // Use today's date in IST for daily tasks
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        // Get deadline date from task
+        let baseDeadlineDate: Date;
+        if (taskAny.deadlineDate) {
+          baseDeadlineDate = new Date(taskAny.deadlineDate);
+          baseDeadlineDate.setHours(0, 0, 0, 0);
+        } else if (taskAny.assignedDate) {
+          baseDeadlineDate = new Date(taskAny.assignedDate);
+          baseDeadlineDate.setHours(0, 0, 0, 0);
+        } else {
+          baseDeadlineDate = new Date(today);
+          baseDeadlineDate.setHours(0, 0, 0, 0);
         }
         
-        // Reset all subtasks for this task
-        await subtasksCollection.updateMany(
-          { taskId: task._id },
+        // Get deadline time (from subtask or parent task, default to 23:59)
+        const baseDeadlineTime = taskAny.deadlineTime || "23:59";
+        
+        // Save all incomplete subtasks as deadline_passed before resetting
+        for (const subtask of incompleteSubtasks) {
+          const subtaskAny = subtask as any;
+          
+          // Use subtask's deadline if available, otherwise use parent task's deadline
+          const deadlineTime = subtaskAny.deadlineTime || baseDeadlineTime;
+          let subtaskDeadlineDate: Date;
+          
+          if (subtaskAny.deadlineDate) {
+            subtaskDeadlineDate = new Date(subtaskAny.deadlineDate);
+            subtaskDeadlineDate.setHours(0, 0, 0, 0);
+          } else {
+            subtaskDeadlineDate = new Date(baseDeadlineDate);
+            subtaskDeadlineDate.setHours(0, 0, 0, 0);
+          }
+          
+          const [h, m] = deadlineTime.split(":");
+          subtaskDeadlineDate.setHours(parseInt(h), parseInt(m), 0, 0);
+          
+          const assignedTo = subtaskAny.assignee || (subtaskAny.assignees && subtaskAny.assignees.length > 0 ? subtaskAny.assignees[0] : null);
+          
+          // Save as SubtaskCompletion record with deadline_passed status
+          // This ensures fines are applied to employees who didn't complete their subtasks
+          await saveSubtaskCompletionHistory({
+            ...subtask,
+            status: "pending", // Keep as pending (not completed)
+            tickedAt: null, // Not ticked
+            completedAt: null, // Not completed
+            completedBy: assignedTo,
+            approvalStatus: "deadline_passed", // Mark as deadline passed for fine
+            deadlineDate: subtaskDeadlineDate,
+            deadlineTime: deadlineTime,
+          }, task);
+          
+          console.log(`[Task Recurrence] Saved incomplete subtask ${subtask._id} as deadline_passed before reset. Fine will be applied.`);
+        }
+        
+        // Reset all subtasks for this task - uncheck all completed ones
+        // Ensure taskId is properly formatted as ObjectId for matching
+        const taskIdObj = task._id instanceof ObjectId ? task._id : new ObjectId(task._id);
+        
+        // CRITICAL: Also reset the 'ticked' boolean field which indicates if subtask is checked
+        const subtaskResetResult = await subtasksCollection.updateMany(
+          { taskId: taskIdObj },
           {
             $set: {
-              status: "pending"
+              status: "pending",
+              ticked: false, // CRITICAL: Reset the ticked boolean field
+              approvalStatus: "pending"
             },
             $unset: {
               completedAt: "",
               completedBy: "",
-              tickedAt: ""
+              tickedAt: "",
+              timeSpent: ""
             }
           }
         );
+        
+        // Log the reset result for debugging
+        if (subtaskResetResult.modifiedCount > 0) {
+          console.log(`[Task Recurrence] Reset ${subtaskResetResult.modifiedCount} subtask(s) for task ${task._id} (matched: ${subtaskResetResult.matchedCount})`);
+        } else if (subtaskResetResult.matchedCount > 0) {
+          console.log(`[Task Recurrence] Warning: Matched ${subtaskResetResult.matchedCount} subtask(s) but modified 0 for task ${task._id}`);
+        }
         
         resetCount++;
         console.log(`[Task Recurrence] Reset task ${task._id} and its subtasks (${task.taskKind})`);

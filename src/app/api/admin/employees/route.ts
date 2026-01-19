@@ -14,8 +14,17 @@ export async function GET() {
     }
 
     // Check if admin or has VIEW_EMPLOYEES or MANAGE_EMPLOYEES permission
-    const hasAccess = await isAdminOrHasPermission(PERMISSIONS.VIEW_EMPLOYEES) || 
-                      await isAdminOrHasPermission(PERMISSIONS.MANAGE_EMPLOYEES);
+    let hasAccess = false;
+    try {
+      const hasViewAccess = await isAdminOrHasPermission(PERMISSIONS.VIEW_EMPLOYEES);
+      const hasManageAccess = await isAdminOrHasPermission(PERMISSIONS.MANAGE_EMPLOYEES);
+      hasAccess = hasViewAccess || hasManageAccess;
+    } catch (permError: any) {
+      console.error("[Employees API] Error checking permissions:", permError);
+      // If permission check fails, allow admin access as fallback
+      hasAccess = session.user.role === 'admin';
+    }
+    
     if (!hasAccess) {
       return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
     }
@@ -29,17 +38,27 @@ export async function GET() {
       .find({})
       .toArray();
 
-    // Get user IDs to fetch user details
+    // Get user IDs to fetch user details - convert to ObjectId and filter out invalid ones
     const userIds = profiles
-      .map((p: any) => p.userId)
-      .filter((id: any) => id);
+      .map((p: any) => {
+        if (!p.userId) return null;
+        try {
+          return p.userId instanceof ObjectId ? p.userId : new ObjectId(p.userId);
+        } catch (e) {
+          console.warn(`Invalid userId in profile ${p._id}:`, p.userId);
+          return null;
+        }
+      })
+      .filter((id: any) => id !== null);
 
     // Fetch user details (name, email) from users collection
-    const users = await db
-      .collection("users")
-      .find({ _id: { $in: userIds } })
-      .project({ _id: 1, name: 1, email: 1 })
-      .toArray();
+    const users = userIds.length > 0 
+      ? await db
+          .collection("users")
+          .find({ _id: { $in: userIds } })
+          .project({ _id: 1, name: 1, email: 1 })
+          .toArray()
+      : [];
 
     // Create a map of userId to user details
     const userMap = new Map(
@@ -64,8 +83,12 @@ export async function GET() {
 
     // Return just the basic employee data - stats can be fetched on-demand
     return NextResponse.json({ employees });
-  } catch (error) {
-    console.error(error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  } catch (error: any) {
+    console.error("[Employees API] Error fetching employees:", error);
+    console.error("[Employees API] Error stack:", error?.stack);
+    return NextResponse.json({ 
+      error: "Internal server error",
+      message: error?.message || "Unknown error"
+    }, { status: 500 });
   }
 }
