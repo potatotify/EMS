@@ -7,7 +7,7 @@ import clientPromise from "@/lib/mongodb";
 import {cookies} from "next/headers";
 import bcrypt from "bcryptjs";
 
-const ADMIN_EMAILS = ["chiragkhati04@gmail.com","zprootech@gmail.com","insightfusionanalytics@gmail.com","piyush31221@gmail.com","harshitbali9@gmail.com"];
+const ADMIN_EMAILS = ["chiragkhati04@gmail.com","zprootech@gmail.com","insightfusionanalytics@gmail.com","piyush31221@gmail.com","harshitbali9@gmail.com","mandalsusmita04012003@gmail.com"];
 
 const createCustomAdapter = () => {
   const adapter = MongoDBAdapter(clientPromise);
